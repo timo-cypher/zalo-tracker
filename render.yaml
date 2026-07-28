@@ -2,24 +2,19 @@ services:
   - type: web
     name: zalo-telegram-bridge
     runtime: node
-    plan: starter # bắt buộc >= starter để không bị "ngủ" sau 15 phút không request
     buildCommand: npm install
     startCommand: node src/index.js
     healthCheckPath: /health
     envVars:
       - key: TELEGRAM_BOT_TOKEN
-        sync: false # điền thủ công trong dashboard, không commit vào repo
+        sync: false
       - key: TELEGRAM_CHAT_ID
         sync: false
       - key: SESSION_JSON_BASE64
-        sync: false # kết quả base64 của session.json lấy từ lần login local
+        sync: false
       - key: DB_PATH
-        value: /data/messages.db
+        value: /tmp/data/messages.db
       - key: SESSION_PATH
-        value: /data/session.json
+        value: /tmp/data/session.json
       - key: REPORT_CRON
         value: "0 8 * * *"
-    disk:
-      name: bridge-data
-      mountPath: /data
-      sizeGB: 1

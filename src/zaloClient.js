@@ -1,7 +1,7 @@
 const path = require("path");
 const { exec } = require("child_process");
 const { Zalo, LoginQRCallbackEventType } = require("zca-js");
-const { saveSession, loadSession } = require("./sessionStore");
+const { saveSession, loadSession, saveSessionBase64 } = require("./sessionStore");
 
 let api = null;
 
@@ -90,6 +90,7 @@ async function login() {
             imei: event.data.imei,
             userAgent: event.data.userAgent,
           });
+          saveSessionBase64(); // tự động tạo file session_base64.txt
           console.log("Đã lưu session đăng nhập cho lần sau.");
           break;
       }

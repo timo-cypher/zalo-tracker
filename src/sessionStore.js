@@ -42,4 +42,25 @@ function clearSession() {
   if (fs.existsSync(SESSION_PATH)) fs.unlinkSync(SESSION_PATH);
 }
 
-module.exports = { saveSession, loadSession, clearSession };
+const BASE64_PATH = process.env.SESSION_BASE64_PATH || './data/session_base64.txt';
+
+/**
+ * Đọc file session.json và ghi ra file text chứa base64,
+ * để người dùng copy dán vào Render dashboard không cần gõ tay.
+ */
+function saveSessionBase64() {
+  try {
+    if (!fs.existsSync(SESSION_PATH)) {
+      console.warn('[session] Không tìm thấy session.json để tạo base64.');
+      return;
+    }
+    const data = fs.readFileSync(SESSION_PATH);
+    const b64 = data.toString('base64');
+    fs.writeFileSync(BASE64_PATH, b64, 'utf8');
+    console.log(`[session] Đã lưu base64 session vào ${path.resolve(BASE64_PATH)}`);
+  } catch (err) {
+    console.error('[session] Lỗi khi tạo file base64:', err.message);
+  }
+}
+
+module.exports = { saveSession, loadSession, clearSession, saveSessionBase64 };

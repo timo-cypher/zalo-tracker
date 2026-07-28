@@ -5,6 +5,7 @@ const { ThreadType } = require('zca-js');
 
 const { login, startListening, sendTextMessage } = require('./zaloClient');
 const { logMessage, getMessagesSince } = require('./store');
+const { saveSessionBase64 } = require('./sessionStore');
 const { sendToTelegram, formatReport, escapeHtml } = require('./telegramReporter');
 
 const app = express();
@@ -130,6 +131,9 @@ app.get('/report/now', async (_req, res) => {
 async function main() {
   // 1. Đăng nhập (tự thử session đã lưu trước, fallback QR nếu cần — xem zaloClient.js)
   await login();
+
+  // Tạo file session_base64.txt để copy lên Render dashboard
+  saveSessionBase64();
 
   // 2. Bắt đầu lắng nghe tin nhắn đến/đi
   startListening(handleIncomingMessage);
