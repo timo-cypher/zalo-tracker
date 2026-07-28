@@ -123,6 +123,20 @@ function handleIncomingMessage(message) {
 
   // === XỬ LÝ MEDIA (ảnh / video / sticker) ===
   const media = detectMedia(content);
+
+  // 🔧 DEBUG: log content keys để xem video có field gì
+  if (media && media.type === 'photo' && (!content.oriUrl && !content.normalUrl)) {
+    // Nếu detect là photo nhưng không có oriUrl → debug
+    console.log('[debug] content keys:', Object.keys(content).join(', '));
+  }
+  // 🔧 DEBUG: log cả content nếu là video (để user gửi lại cho tôi)
+  if (typeof content === 'object' && content) {
+    const keys = Object.keys(content);
+    const sample = JSON.stringify(content).slice(0, 500);
+    console.log('[debug] content keys:', keys.join(', '));
+    console.log('[debug] content sample:', sample);
+  }
+
   if (media) {
     // Log vào SQLite
     const logContent = media.desc || `[${media.type === 'video' ? 'Video' : 'Ảnh'}]`;
