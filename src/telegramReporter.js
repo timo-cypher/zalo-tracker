@@ -1,4 +1,6 @@
 const axios = require('axios');
+const FormData = require('form-data');
+const { loadSession } = require('./sessionStore');
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -72,24 +74,78 @@ function escapeHtml(s) {
 }
 
 /**
+ * Chuyển mảng cookie từ session Zalo thành chuỗi header Cookie.
+ */
+function formatCookies(cookieArr) {
+  if (!Array.isArray(cookieArr)) return '';
+  return cookieArr.map(c => `${c.key || c.name}=${c.value}`).join('; ');
+}
+
+/**
  * Gửi ảnh/video lên Telegram kèm caption.
- * @param {string} fileUrl - URL trực tiếp của file (từ Zalo CDN)
+ * Ảnh: gửi URL trực tiếp (Zalo CDN ảnh thường không cần auth).
+ * Video: tải về từ Zalo CDN bằng cookies, rồi upload lên Telegram (vì CDN video cần auth).
+ *
+ * @param {string} fileUrl - URL của file từ Zalo
  * @param {'photo'|'video'} mediaType - loại media
  * @param {string} [caption] - text mô tả (HTML)
  */
 async function sendMediaToTelegram(fileUrl, mediaType, caption) {
-  const method = mediaType === 'video' ? 'sendVideo' : 'sendPhoto';
-  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/${method}`;
-  const payload = {
-    chat_id: TELEGRAM_CHAT_ID,
-    [mediaType === 'video' ? 'video' : 'photo']: fileUrl,
-    disable_web_page_preview: true,
-  };
-  if (caption) {
-    payload.caption = caption.slice(0, 1024); // Telegram giới hạn 1024 ký tự cho caption
-    payload.parse_mode = 'HTML';
+  const truncatedCaption = caption ? caption.slice(0, 1024) : undefined;
+
+  if (mediaType === 'photo') {
+    // Ảnh — gửi URL trực tiếp, Telegram tự tải về
+    const payload = {
+      chat_id: TELEGRAM_CHAT_ID,
+      photo: fileUrl,
+      disable_web_page_preview: true,
+    };
+    if (truncatedCaption) {
+      payload.caption = truncatedCaption;
+      payload.parse_mode = 'HTML';
+    }
+    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, payload);
+    return;
   }
-  await axios.post(url, payload);
+
+  // === Video — tải về từ Zalo CDN bằng cookies rồi upload lên Telegram ===
+  const session = loadSession();
+  const cookieStr = formatCookies(session?.cookie);
+
+  const dlHeaders = { 'User-Agent': session?.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' };
+  if (cookieStr) dlHeaders.Cookie = cookieStr;
+
+  console.log('[media] Đang tải video từ Zalo CDN...');
+
+  const dlResponse = await axios.get(fileUrl, {
+    responseType: 'stream',
+    headers: dlHeaders,
+    timeout: 60_000,
+  });
+
+  const ext = (dlResponse.headers['content-type'] || '').includes('video') ? 'mp4' : 'mp4';
+
+  const form = new FormData();
+  form.append('chat_id', TELEGRAM_CHAT_ID);
+  form.append('video', dlResponse.data, {
+    filename: `video.${ext}`,
+    contentType: dlResponse.headers['content-type'] || 'video/mp4',
+  });
+  if (truncatedCaption) {
+    form.append('caption', truncatedCaption);
+    form.append('parse_mode', 'HTML');
+  }
+
+  // Upload lên Telegram
+  console.log('[media] Đang upload video lên Telegram...');
+  await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendVideo`, form, {
+    headers: form.getHeaders(),
+    maxContentLength: Infinity,
+    maxBodyLength: Infinity,
+    timeout: 300_000, // 5 phút cho video lớn
+  });
+
+  console.log('[media] Video đã gửi lên Telegram thành công.');
 }
 
 module.exports = { sendToTelegram, sendMediaToTelegram, formatReport, escapeHtml };

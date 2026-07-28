@@ -4,7 +4,7 @@ const cron = require('node-cron');
 const { ThreadType } = require('zca-js');
 
 const { login, startListening, sendTextMessage } = require('./zaloClient');
-const { logMessage, getMessagesSince } = require('./store');
+const { logMessage, deleteMessage, getMessagesSince } = require('./store');
 const { saveSessionBase64 } = require('./sessionStore');
 const { sendToTelegram, sendMediaToTelegram, formatReport, escapeHtml } = require('./telegramReporter');
 
@@ -100,12 +100,12 @@ function handleIncomingMessage(message) {
       }
     }
 
-    logMessage({ direction, userId: message.threadId, userName: displayName, content, msgType: 'text' });
+    const textMsgId = logMessage({ direction, userId: message.threadId, userName: displayName, content, msgType: 'text' });
     console.log(`[${direction === 'in' ? 'NHẬN' : 'GỬI'}] ${displayName}: ${content}`);
 
-    sendToTelegram(formatTelegramForward(message, direction)).catch((err) =>
-      console.error('[forward] Lỗi gửi text:', err.message)
-    );
+    sendToTelegram(formatTelegramForward(message, direction))
+      .then(() => deleteMessage(textMsgId))
+      .catch((err) => console.error('[forward] Lỗi gửi text:', err.message));
     return;
   }
 
@@ -114,7 +114,7 @@ function handleIncomingMessage(message) {
   if (media) {
     // Log vào SQLite
     const logContent = media.desc || `[${media.type === 'video' ? 'Video' : 'Ảnh'}]`;
-    logMessage({ direction, userId: message.threadId, userName: displayName, content: logContent, msgType: media.type });
+    const mediaMsgId = logMessage({ direction, userId: message.threadId, userName: displayName, content: logContent, msgType: media.type });
     console.log(`[${direction === 'in' ? 'NHẬN' : 'GỬI'}] ${displayName}: ${logContent}`);
 
     // Tạo caption: thời gian + tên người gửi
@@ -123,16 +123,16 @@ function handleIncomingMessage(message) {
     const label = direction === 'in' ? 'RECEIVED FROM' : 'SENT TO';
     const caption = `<code>${escapeHtml(time)}</code>\n${icon} <b>${label} ${escapeHtml(displayName)}</b>`;
 
-    // Gửi media lên Telegram
-    sendMediaToTelegram(media.url, media.type, caption).catch((err) =>
-      console.error(`[forward] Lỗi gửi ${media.type}:`, err.message)
-    );
+    // Gửi media lên Telegram, xoá SQLite nếu thành công
+    sendMediaToTelegram(media.url, media.type, caption)
+      .then(() => deleteMessage(mediaMsgId))
+      .catch((err) => console.error(`[forward] Lỗi gửi ${media.type}:`, err.message));
     return;
   }
 
   // === LOẠI KHÁC (link preview, file, v.v.) — log + báo text ===
   console.log(`[${direction === 'in' ? 'NHẬN' : 'GỬI'}] ${displayName}: [message type không xác định]`);
-  logMessage({ direction, userId: message.threadId, userName: displayName, content: '[unsupported]', msgType: 'other' });
+  const otherMsgId = logMessage({ direction, userId: message.threadId, userName: displayName, content: '[unsupported]', msgType: 'other' });
 
   const time = new Date().toLocaleTimeString('vi-VN');
   const icon = direction === 'in' ? '📩' : '📤';
@@ -141,9 +141,9 @@ function handleIncomingMessage(message) {
     `<code>${escapeHtml(time)}</code>\n` +
     `${icon} <b>${label} ${escapeHtml(displayName)}</b>\n` +
     `📎 [File/Sticker/Link]`;
-  sendToTelegram(fallbackText).catch((err) =>
-    console.error('[forward] Lỗi gửi fallback:', err.message)
-  );
+  sendToTelegram(fallbackText)
+    .then(() => deleteMessage(otherMsgId))
+    .catch((err) => console.error('[forward] Lỗi gửi fallback:', err.message));
 }
 
 app.post('/send', async (req, res) => {

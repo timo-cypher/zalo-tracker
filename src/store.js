@@ -32,7 +32,15 @@ function logMessage({ direction, userId, userName, content, msgType = 'text' }) 
     INSERT INTO messages (direction, user_id, user_name, content, msg_type)
     VALUES (@direction, @userId, @userName, @content, @msgType)
   `);
-  stmt.run({ direction, userId, userName: userName || null, content: content || '', msgType });
+  const result = stmt.run({ direction, userId, userName: userName || null, content: content || '', msgType });
+  return Number(result.lastInsertRowid); // trả về ID để sau này xoá nếu cần
+}
+
+/**
+ * Xoá một tin nhắn theo ID.
+ */
+function deleteMessage(id) {
+  db.prepare('DELETE FROM messages WHERE id = ?').run(id);
 }
 
 /**
@@ -48,4 +56,4 @@ function getMessagesSince(sinceISO) {
   return stmt.all(sinceISO);
 }
 
-module.exports = { db, logMessage, getMessagesSince };
+module.exports = { db, logMessage, deleteMessage, getMessagesSince };
