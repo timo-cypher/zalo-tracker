@@ -11,6 +11,8 @@ const { sendToTelegram, formatReport, escapeHtml } = require('./telegramReporter
 const app = express();
 app.use(express.json());
 
+// Root route trả về 200 để UptimeRobot không báo Down (nó ping vào URL gốc)
+app.get('/', (_req, res) => res.status(200).json({ ok: true, uptime: process.uptime() }));
 app.get('/health', (_req, res) => res.status(200).json({ ok: true, uptime: process.uptime() }));
 
 const PORT = process.env.PORT || 3000;
