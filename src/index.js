@@ -53,29 +53,41 @@ function formatTelegramForward(message, direction) {
 
 /**
  * Phát hiện loại media từ content object của Zalo message.
+ * Zalo video message chứa cả thumbnail (oriUrl) + video URL (fileUrl),
+ * nên phải kiểm tra video TRƯỚC để không bị nhận nhầm thành ảnh.
  * Trả về { type: 'photo'|'video'|null, url: string|null, desc: string }.
  */
 function detectMedia(content) {
   if (typeof content !== 'object' || !content) return null;
 
-  // Ảnh: content có oriUrl / normalUrl / thumb
+  // === VIDEO: kiểm tra trước vì video cũng có thumbnail ===
+  const ext = (content.fileName || '').split('.').pop().toLowerCase();
+  const videoExts = ['mp4', 'mov', 'avi', 'mkv', 'webm', '3gp', 'm4v'];
+
+  // Có fileUrl + extension video → chắc chắn là video
+  if (content.fileUrl && typeof content.fileUrl === 'string' && videoExts.includes(ext)) {
+    return { type: 'video', url: content.fileUrl, desc: content.desc || '' };
+  }
+
+  // Có videoUrl field → video
+  if (content.videoUrl && typeof content.videoUrl === 'string') {
+    return { type: 'video', url: content.videoUrl, desc: content.desc || '' };
+  }
+
+  // Có fileUrl + duration → video (Zalo đôi khi không gửi extension)
+  if (content.fileUrl && typeof content.fileUrl === 'string' && content.duration) {
+    return { type: 'video', url: content.fileUrl, desc: content.desc || '' };
+  }
+
+  // === ẢNH: có oriUrl / normalUrl / thumb (nhưng không có dấu hiệu video) ===
   const imgUrl = content.oriUrl || content.normalUrl || content.hdUrl || content.thumb;
   if (imgUrl && typeof imgUrl === 'string') {
     return { type: 'photo', url: imgUrl, desc: content.desc || '' };
   }
 
-  // Video: content có fileUrl + tên file có đuôi video
-  if (content.fileUrl && typeof content.fileUrl === 'string') {
-    const ext = (content.fileName || '').split('.').pop().toLowerCase();
-    if (['mp4', 'mov', 'avi', 'mkv', 'webm', '3gp'].includes(ext) || !ext) {
-      return { type: 'video', url: content.fileUrl, desc: content.desc || '' };
-    }
-  }
-
-  // Sticker: content có stickerUrl / stickerId
-  const stkUrl = content.stickerUrl || (content.stickerId ? `https://zalo-stickers.zdn.vn/${content.stickerId}` : null);
-  if (stkUrl) {
-    return { type: 'photo', url: stkUrl, desc: '🎨 Sticker' };
+  // === Sticker ===
+  if (content.stickerUrl) {
+    return { type: 'photo', url: content.stickerUrl, desc: '🎨 Sticker' };
   }
 
   return null;
