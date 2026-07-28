@@ -48,10 +48,21 @@ async function login() {
         "Session cũ không dùng được (có thể đã hết hạn):",
         err.message,
       );
+
+      // Nếu đang chạy trên server không có terminal (Render, VPS không GUI),
+      // không thể quét QR — trả về null để caller giữ server sống và gửi cảnh báo
+      if (!process.stdin.isTTY) {
+        console.warn(
+          "Môi trường không có terminal (headless) — bỏ qua QR login."
+        );
+        return null;
+      }
+
       console.warn("Chuyển sang đăng nhập lại bằng QR...");
     }
   }
 
+  // === Dưới đây chỉ chạy khi có terminal (máy local) ===
   console.log("Đang tạo mã QR đăng nhập, vui lòng đợi vài giây...");
 
   try {
@@ -105,23 +116,78 @@ async function login() {
   return api;
 }
 
-function startListening(onMessage) {
+function startListening(onMessage, onSessionExpired) {
   if (!api) throw new Error("Chưa đăng nhập — gọi login() trước.");
-  api.listener.on("message", onMessage);
 
-  // Theo dõi trạng thái WebSocket để debug nếu mất kết nối
-  api.listener.on("connected", () => console.log("[ws] WebSocket đã kết nối"));
-  api.listener.on("disconnected", (code, reason) =>
-    console.log(`[ws] WebSocket mất kết nối: code=${code}, reason=${reason}`)
-  );
-  api.listener.on("error", (err) =>
-    console.error("[ws] WebSocket lỗi:", err?.message || err)
-  );
-  api.listener.on("closed", (code, reason) =>
-    console.log(`[ws] WebSocket đã đóng: code=${code}, reason=${reason}`)
-  );
+  /**
+   * Đăng ký lại tất cả event handlers lên listener hiện tại.
+   * Hàm này có thể gọi nhiều lần (sau re-login) vì listener
+   * instance được tạo lại mỗi lần login.
+   */
+  function registerEvents() {
+    const lis = api.listener;
 
-  api.listener.start();
+    lis.removeAllListeners();
+    lis.on("message", onMessage);
+
+    lis.on("connected", () => console.log("[ws] WebSocket đã kết nối"));
+    lis.on("disconnected", (code, reason) =>
+      console.log(`[ws] WebSocket mất kết nối: code=${code}, reason=${reason}`)
+    );
+    lis.on("error", (err) =>
+      console.error("[ws] WebSocket lỗi:", err?.message || err)
+    );
+
+    let expiredNotified = false; // chỉ gửi Telegram 1 lần, tránh spam
+
+    // Khi zca-js đã thử retry hết mức (nếu retryOnClose=true) mà vẫn không
+    // được, nó emit "closed". Lúc này cần login lại với session đã lưu.
+    lis.on("closed", async (code, reason) => {
+      console.log(`[ws] WebSocket đã đóng hẳn: code=${code}, reason=${reason}`);
+
+      try {
+        const saved = loadSession();
+        if (!saved) throw new Error("Không có session đã lưu để login lại.");
+
+        const newZalo = new Zalo({
+          selfListen: true,
+          checkUpdate: true,
+          logging: false,
+        });
+        api = await newZalo.login(saved);
+        console.log(`[reconnect] Đã login lại, tài khoản id: ${api.getOwnId()}`);
+
+        // Reset cờ vì đã login thành công
+        expiredNotified = false;
+
+        // Đăng ký lại events với api mới
+        registerEvents();
+        api.listener.start({ retryOnClose: true });
+        console.log("[reconnect] WebSocket đã được khởi động lại.");
+      } catch (err) {
+        console.error("[reconnect] Không thể login lại:", err.message);
+
+        // Chỉ gửi Telegram 1 lần duy nhất, không spam
+        if (!expiredNotified) {
+          expiredNotified = true;
+          if (typeof onSessionExpired === "function") {
+            onSessionExpired(err.message);
+          }
+        }
+
+        // Thử lại im lặng mỗi 60 giây — không gửi Telegram nữa
+        setTimeout(() => {
+          console.log("[reconnect] Thử login lại sau 60s (im lặng)...");
+          api.listener.emit("closed", code, reason);
+        }, 60_000);
+      }
+    });
+  }
+
+  registerEvents();
+
+  // BẬT retryOnClose — zca-js tự động thử lại khi mất kết nối tạm thời
+  api.listener.start({ retryOnClose: true });
 }
 
 async function sendTextMessage(threadId, text, threadType) {

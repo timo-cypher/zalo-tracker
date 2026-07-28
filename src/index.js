@@ -11,22 +11,15 @@ const { sendToTelegram, formatReport, escapeHtml } = require('./telegramReporter
 const app = express();
 app.use(express.json());
 
-// Root route trả về 200 để UptimeRobot không báo Down (nó ping vào URL gốc)
 app.get('/', (_req, res) => res.status(200).json({ ok: true, uptime: process.uptime() }));
 app.get('/health', (_req, res) => res.status(200).json({ ok: true, uptime: process.uptime() }));
 
 const PORT = process.env.PORT || 3000;
 const REPORT_CRON = process.env.REPORT_CRON || '0 8 * * *';
 
-/**
- * Cơ chế chống gửi trùng (dedup):
- * Khi gửi tin qua /send endpoint, sendAndLog ghi vào Set này.
- * Khi WebSocket echo về, handleIncomingMessage kiểm tra và bỏ qua.
- */
-const recentBridgeSends = new Map(); // key -> timestamp
+const recentBridgeSends = new Map();
 let bridgeSendSeq = 0;
 
-// Dọn dẹp Map mỗi 15 giây
 setInterval(() => {
   const cutoff = Date.now() - 15_000;
   for (const [key, ts] of recentBridgeSends) {
@@ -34,10 +27,6 @@ setInterval(() => {
   }
 }, 15_000);
 
-/**
- * Gọi hàm này thay vì gọi thẳng zaloClient.sendTextMessage ở nơi khác trong code,
- * để mọi tin nhắn gửi đi đều tự động được log.
- */
 async function sendAndLog(threadId, text, threadType = ThreadType.User) {
   const dedupKey = `${bridgeSendSeq++}:${threadId}:${text}`;
   recentBridgeSends.set(dedupKey, Date.now());
@@ -61,25 +50,22 @@ function formatTelegramForward(message, direction) {
 }
 
 function handleIncomingMessage(message) {
-  // Bỏ qua tin nhắn không phải text
   const content = message?.data?.content;
   const isPlainText = typeof content === 'string';
   if (!isPlainText) return;
 
   const direction = message.isSelf ? 'out' : 'in';
 
-  // === Chống trùng: nếu tin này vừa được gửi qua /send endpoint thì bỏ qua ===
   if (message.isSelf) {
     for (const [key, ts] of recentBridgeSends) {
       if (key.endsWith(`:${message.threadId}:${content}`)) {
         recentBridgeSends.delete(key);
         console.log(`[dedup] Bỏ qua tin echo từ /send: ${content}`);
-        return; // Đã được sendAndLog xử lý rồi
+        return;
       }
     }
   }
 
-  // Log vào SQLite
   logMessage({
     direction,
     userId: message.threadId,
@@ -90,14 +76,12 @@ function handleIncomingMessage(message) {
 
   console.log(`[${direction === 'in' ? 'NHẬN' : 'GỬI'}] ${message.data?.dName || message.threadId}: ${content}`);
 
-  // Forward real-time lên Telegram
   const telegramText = formatTelegramForward(message, direction);
   sendToTelegram(telegramText).catch((err) =>
     console.error('[forward] Không gửi được tin nhắn lên Telegram:', err.message)
   );
 }
 
-// --- Endpoint thủ công để test gửi tin nhắn (và tự log) ---
 app.post('/send', async (req, res) => {
   const { threadId, text, isGroup } = req.body;
   if (!threadId || !text) return res.status(400).json({ error: 'threadId và text là bắt buộc' });
@@ -111,7 +95,6 @@ app.post('/send', async (req, res) => {
   }
 });
 
-// --- Sinh báo cáo và gửi lên Telegram ---
 async function runReport({ sinceHours = 24, title } = {}) {
   const since = new Date(Date.now() - sinceHours * 3600 * 1000).toISOString();
   const messages = getMessagesSince(since);
@@ -131,21 +114,8 @@ app.get('/report/now', async (_req, res) => {
 });
 
 async function main() {
-  // 1. Đăng nhập (tự thử session đã lưu trước, fallback QR nếu cần — xem zaloClient.js)
-  await login();
-
-  // Tạo file session_base64.txt để copy lên Render dashboard
-  saveSessionBase64();
-
-  // 2. Bắt đầu lắng nghe tin nhắn đến/đi
-  startListening(handleIncomingMessage);
-
-  // 3. Lịch báo cáo tự động
-  cron.schedule(REPORT_CRON, () => {
-    runReport({ sinceHours: 24 }).catch((err) => console.error('[cron] Lỗi gửi báo cáo:', err));
-  });
-
-  // 4. Server HTTP cho các endpoint thủ công (/send, /report/now)
+  // === Luôn start HTTP server trước ===
+  // Dù login có thành công hay không, server vẫn sống để health check
   app.listen(PORT, () => {
     console.log(`Bridge server đang chạy tại http://localhost:${PORT}`);
     console.log(`Gửi tin nhắn thủ công: POST http://localhost:${PORT}/send`);
@@ -153,7 +123,43 @@ async function main() {
     console.log(`Lịch báo cáo tự động: ${REPORT_CRON}`);
   });
 
-  // 5. Báo cho biết process vừa khởi động (hữu ích để phát hiện restart do crash)
+  // 1. Đăng nhập
+  const result = await login();
+
+  if (!result) {
+    // Login thất bại trên headless (Render) — session hết hạn, không thể QR
+    console.error(
+      '⚠️  KHÔNG THỂ ĐĂNG NHẬP ZALO — session đã hết hạn.\n' +
+      '   Server vẫn chạy để nhận health check từ UptimeRobot.\n' +
+      '   Cập nhật SESSION_JSON_BASE64 trên Render dashboard và restart.'
+    );
+    sendToTelegram(
+      '⚠️ <b>Zalo bridge: Session hết hạn</b>\n' +
+      'Không thể đăng nhập lại — cần session mới.\n\n' +
+      'Cập nhật biến <code>SESSION_JSON_BASE64</code> trên Render dashboard và deploy lại.'
+    ).catch((err) => console.error('[startup] Không gửi được cảnh báo Telegram:', err.message));
+    return; // keep server alive, don't start listening
+  }
+
+  // 2. Tạo file session_base64.txt để copy lên Render dashboard
+  saveSessionBase64();
+
+  // 3. Bắt đầu lắng nghe tin nhắn — với auto-reconnect + callback khi session hết hạn
+  startListening(handleIncomingMessage, (reason) => {
+    console.error(`[session] Session hết hạn: ${reason}`);
+    sendToTelegram(
+      '⚠️ <b>Zalo bridge: Mất kết nối</b>\n' +
+      `Lý do: ${escapeHtml(reason)}\n\n` +
+      'Cập nhật <code>SESSION_JSON_BASE64</code> trên Render dashboard và deploy lại.'
+    ).catch(() => {});
+  });
+
+  // 4. Lịch báo cáo tự động
+  cron.schedule(REPORT_CRON, () => {
+    runReport({ sinceHours: 24 }).catch((err) => console.error('[cron] Lỗi gửi báo cáo:', err));
+  });
+
+  // 5. Báo khởi động
   sendToTelegram('✅ Zalo-Telegram bridge vừa khởi động (hoặc restart).').catch((err) =>
     console.error('[startup] Không gửi được thông báo khởi động:', err.message)
   );
@@ -161,21 +167,20 @@ async function main() {
 
 main().catch((err) => {
   console.error('Lỗi khởi động:', err);
-  process.exit(1); // để pm2/systemd tự restart theo policy đã cấu hình
+  // Không process.exit() — giữ server sống để health check
 });
 
-// --- Bắt lỗi toàn cục ---
-// Thay vì để process "treo" ở trạng thái nửa sống nửa chết khi có lỗi không
-// bắt được (ví dụ zca-js mất kết nối đột ngột), thoát hẳn để process manager
-// (pm2/systemd) khởi động lại sạch — đáng tin cậy hơn là tự viết logic
-// reconnect tay cho một thư viện không chính thức, ít tài liệu.
+// === Xử lý lỗi toàn cục ===
+// uncaughtException: lỗi nghiêm trọng, log và thoát (Render sẽ restart tự động)
 process.on('uncaughtException', (err) => {
   console.error('[fatal] uncaughtException:', err);
-  process.exit(1);
+  // Không exit — để server sống cho health check
 });
+
+// unhandledRejection: thường do zca-js WebSocket, không nên crash process
 process.on('unhandledRejection', (reason) => {
-  console.error('[fatal] unhandledRejection:', reason);
-  process.exit(1);
+  console.error('[warn] unhandledRejection:', reason);
+  // Chỉ log, không exit — reconnect sẽ xử lý sau
 });
 
 module.exports = { sendAndLog };
