@@ -71,4 +71,25 @@ function escapeHtml(s) {
   return String(s || '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 }
 
-module.exports = { sendToTelegram, formatReport, escapeHtml };
+/**
+ * Gửi ảnh/video lên Telegram kèm caption.
+ * @param {string} fileUrl - URL trực tiếp của file (từ Zalo CDN)
+ * @param {'photo'|'video'} mediaType - loại media
+ * @param {string} [caption] - text mô tả (HTML)
+ */
+async function sendMediaToTelegram(fileUrl, mediaType, caption) {
+  const method = mediaType === 'video' ? 'sendVideo' : 'sendPhoto';
+  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/${method}`;
+  const payload = {
+    chat_id: TELEGRAM_CHAT_ID,
+    [mediaType === 'video' ? 'video' : 'photo']: fileUrl,
+    disable_web_page_preview: true,
+  };
+  if (caption) {
+    payload.caption = caption.slice(0, 1024); // Telegram giới hạn 1024 ký tự cho caption
+    payload.parse_mode = 'HTML';
+  }
+  await axios.post(url, payload);
+}
+
+module.exports = { sendToTelegram, sendMediaToTelegram, formatReport, escapeHtml };

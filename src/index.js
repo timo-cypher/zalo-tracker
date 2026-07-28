@@ -6,7 +6,7 @@ const { ThreadType } = require('zca-js');
 const { login, startListening, sendTextMessage } = require('./zaloClient');
 const { logMessage, getMessagesSince } = require('./store');
 const { saveSessionBase64 } = require('./sessionStore');
-const { sendToTelegram, formatReport, escapeHtml } = require('./telegramReporter');
+const { sendToTelegram, sendMediaToTelegram, formatReport, escapeHtml } = require('./telegramReporter');
 
 const app = express();
 app.use(express.json());
@@ -51,36 +51,98 @@ function formatTelegramForward(message, direction) {
   );
 }
 
-function handleIncomingMessage(message) {
-  const content = message?.data?.content;
-  const isPlainText = typeof content === 'string';
-  if (!isPlainText) return;
+/**
+ * Phát hiện loại media từ content object của Zalo message.
+ * Trả về { type: 'photo'|'video'|null, url: string|null, desc: string }.
+ */
+function detectMedia(content) {
+  if (typeof content !== 'object' || !content) return null;
 
-  const direction = message.isSelf ? 'out' : 'in';
+  // Ảnh: content có oriUrl / normalUrl / thumb
+  const imgUrl = content.oriUrl || content.normalUrl || content.hdUrl || content.thumb;
+  if (imgUrl && typeof imgUrl === 'string') {
+    return { type: 'photo', url: imgUrl, desc: content.desc || '' };
+  }
 
-  if (message.isSelf) {
-    for (const [key, ts] of recentBridgeSends) {
-      if (key.endsWith(`:${message.threadId}:${content}`)) {
-        recentBridgeSends.delete(key);
-        console.log(`[dedup] Bỏ qua tin echo từ /send: ${content}`);
-        return;
-      }
+  // Video: content có fileUrl + tên file có đuôi video
+  if (content.fileUrl && typeof content.fileUrl === 'string') {
+    const ext = (content.fileName || '').split('.').pop().toLowerCase();
+    if (['mp4', 'mov', 'avi', 'mkv', 'webm', '3gp'].includes(ext) || !ext) {
+      return { type: 'video', url: content.fileUrl, desc: content.desc || '' };
     }
   }
 
-  logMessage({
-    direction,
-    userId: message.threadId,
-    userName: message.data?.dName || null,
-    content,
-    msgType: 'text',
-  });
+  // Sticker: content có stickerUrl / stickerId
+  const stkUrl = content.stickerUrl || (content.stickerId ? `https://zalo-stickers.zdn.vn/${content.stickerId}` : null);
+  if (stkUrl) {
+    return { type: 'photo', url: stkUrl, desc: '🎨 Sticker' };
+  }
 
-  console.log(`[${direction === 'in' ? 'NHẬN' : 'GỬI'}] ${message.data?.dName || message.threadId}: ${content}`);
+  return null;
+}
 
-  const telegramText = formatTelegramForward(message, direction);
-  sendToTelegram(telegramText).catch((err) =>
-    console.error('[forward] Không gửi được tin nhắn lên Telegram:', err.message)
+function handleIncomingMessage(message) {
+  const content = message?.data?.content;
+  const direction = message.isSelf ? 'out' : 'in';
+
+  const displayName = message.data?.dName || message.threadId;
+
+  // === XỬ LÝ TEXT ===
+  if (typeof content === 'string') {
+    // Dedup cho tin gửi từ /send
+    if (message.isSelf) {
+      for (const [key, ts] of recentBridgeSends) {
+        if (key.endsWith(`:${message.threadId}:${content}`)) {
+          recentBridgeSends.delete(key);
+          console.log(`[dedup] Bỏ qua tin echo từ /send: ${content}`);
+          return;
+        }
+      }
+    }
+
+    logMessage({ direction, userId: message.threadId, userName: displayName, content, msgType: 'text' });
+    console.log(`[${direction === 'in' ? 'NHẬN' : 'GỬI'}] ${displayName}: ${content}`);
+
+    sendToTelegram(formatTelegramForward(message, direction)).catch((err) =>
+      console.error('[forward] Lỗi gửi text:', err.message)
+    );
+    return;
+  }
+
+  // === XỬ LÝ MEDIA (ảnh / video / sticker) ===
+  const media = detectMedia(content);
+  if (media) {
+    // Log vào SQLite
+    const logContent = media.desc || `[${media.type === 'video' ? 'Video' : 'Ảnh'}]`;
+    logMessage({ direction, userId: message.threadId, userName: displayName, content: logContent, msgType: media.type });
+    console.log(`[${direction === 'in' ? 'NHẬN' : 'GỬI'}] ${displayName}: ${logContent}`);
+
+    // Tạo caption: thời gian + tên người gửi
+    const time = new Date().toLocaleTimeString('vi-VN');
+    const icon = direction === 'in' ? '📩' : '📤';
+    const label = direction === 'in' ? 'RECEIVED FROM' : 'SENT TO';
+    const caption = `<code>${escapeHtml(time)}</code>\n${icon} <b>${label} ${escapeHtml(displayName)}</b>`;
+
+    // Gửi media lên Telegram
+    sendMediaToTelegram(media.url, media.type, caption).catch((err) =>
+      console.error(`[forward] Lỗi gửi ${media.type}:`, err.message)
+    );
+    return;
+  }
+
+  // === LOẠI KHÁC (link preview, file, v.v.) — log + báo text ===
+  console.log(`[${direction === 'in' ? 'NHẬN' : 'GỬI'}] ${displayName}: [message type không xác định]`);
+  logMessage({ direction, userId: message.threadId, userName: displayName, content: '[unsupported]', msgType: 'other' });
+
+  const time = new Date().toLocaleTimeString('vi-VN');
+  const icon = direction === 'in' ? '📩' : '📤';
+  const label = direction === 'in' ? 'RECEIVED FROM' : 'SENT TO';
+  const fallbackText =
+    `<code>${escapeHtml(time)}</code>\n` +
+    `${icon} <b>${label} ${escapeHtml(displayName)}</b>\n` +
+    `📎 [File/Sticker/Link]`;
+  sendToTelegram(fallbackText).catch((err) =>
+    console.error('[forward] Lỗi gửi fallback:', err.message)
   );
 }
 
