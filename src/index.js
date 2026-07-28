@@ -3,7 +3,7 @@ const express = require('express');
 const cron = require('node-cron');
 const { ThreadType } = require('zca-js');
 
-const { login, startListening, sendTextMessage } = require('./zaloClient');
+const { login, startListening, sendTextMessage, getApi } = require('./zaloClient');
 const { logMessage, deleteMessage, getMessagesSince } = require('./store');
 const { saveSessionBase64 } = require('./sessionStore');
 const { sendToTelegram, sendMediaToTelegram, formatReport, escapeHtml } = require('./telegramReporter');
@@ -22,6 +22,56 @@ const REPORT_CRON = process.env.REPORT_CRON || '0 8 * * *';
 const recentBridgeSends = new Map();
 let bridgeSendSeq = 0;
 
+// === Phone number cache: chỉ query 1 lần/người/ngày ===
+const phoneCache = new Map(); // userId -> { phone, fetchedAt }
+const PHONE_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+
+const phonePendingFetches = new Map(); // userId -> Promise để dedup concurrent requests
+
+async function fetchPhoneNumber(userId) {
+  // Kiểm tra cache
+  const cached = phoneCache.get(userId);
+  if (cached && Date.now() - cached.fetchedAt < PHONE_CACHE_TTL_MS) {
+    return cached.phone;
+  }
+
+  // Nếu đang có request cho userId này đang bay, dùng lại promise đó
+  if (phonePendingFetches.has(userId)) {
+    return phonePendingFetches.get(userId);
+  }
+
+  const promise = (async () => {
+    try {
+      const api = getApi();
+      if (!api) return null;
+
+      const result = await api.getUserInfo(userId);
+      const key = `${userId}_0`;
+      const profile = result?.changed_profiles?.[key];
+      const phone = profile?.phoneNumber || null;
+
+      phoneCache.set(userId, { phone, fetchedAt: Date.now() });
+
+      if (phone) {
+        console.log(`[phone] Đã lấy sđt cho ${profile.displayName || userId}: ${phone}`);
+      } else {
+        console.log(`[phone] ${profile?.displayName || userId}: không có sđt (đã ẩn)`);
+      }
+
+      return phone;
+    } catch (err) {
+      console.error(`[phone] Lỗi lấy sđt cho ${userId}:`, err.message);
+      phoneCache.set(userId, { phone: null, fetchedAt: Date.now() - PHONE_CACHE_TTL_MS + 5 * 60 * 1000 });
+      return null;
+    } finally {
+      phonePendingFetches.delete(userId);
+    }
+  })();
+
+  phonePendingFetches.set(userId, promise);
+  return promise;
+}
+
 setInterval(() => {
   const cutoff = Date.now() - 15_000;
   for (const [key, ts] of recentBridgeSends) {
@@ -38,15 +88,16 @@ async function sendAndLog(threadId, text, threadType = ThreadType.User) {
   return result;
 }
 
-function formatTelegramForward(message, direction) {
+function formatTelegramForward(message, direction, phone) {
   const name = message.data?.dName || message.threadId;
+  const phoneSuffix = phone ? ` [${escapeHtml(phone)}]` : '';
   const time = new Date().toLocaleTimeString('vi-VN');
   const icon = direction === 'in' ? '📩' : '📤';
   const label = direction === 'in' ? 'RECEIVED FROM' : 'SENT TO';
   const content = (message.data?.content || '').slice(0, 1000);
   return (
     `<code>${escapeHtml(time)}</code>\n` +
-    `${icon} <b>${label} ${escapeHtml(name)}</b>\n` +
+    `${icon} <b>${label} ${escapeHtml(name)}${phoneSuffix}</b>\n` +
     `${escapeHtml(content)}`
   );
 }
@@ -89,82 +140,83 @@ function detectMedia(content, msgType) {
   return null;
 }
 
-function handleIncomingMessage(message) {
-  const content = message?.data?.content;
-  const direction = message.isSelf ? 'out' : 'in';
+async function handleIncomingMessage(message) {
+  try {
+    const content = message?.data?.content;
+    const direction = message.isSelf ? 'out' : 'in';
+    const displayName = message.data?.dName || message.threadId;
 
-  const displayName = message.data?.dName || message.threadId;
+    // Lấy số điện thoại từ cache hoặc API (chỉ query lần đầu trong ngày)
+    const phone = await fetchPhoneNumber(message.threadId);
+    const phoneSuffix = phone ? ` [${phone}]` : '';
 
-  // === XỬ LÝ TEXT ===
-  if (typeof content === 'string') {
-    // Dedup cho tin gửi từ /send
-    if (message.isSelf) {
-      for (const [key, ts] of recentBridgeSends) {
-        if (key.endsWith(`:${message.threadId}:${content}`)) {
-          recentBridgeSends.delete(key);
-          console.log(`[dedup] Bỏ qua tin echo từ /send: ${content}`);
-          return;
+    // === XỬ LÝ TEXT ===
+    if (typeof content === 'string') {
+      // Dedup cho tin gửi từ /send
+      if (message.isSelf) {
+        for (const [key, ts] of recentBridgeSends) {
+          if (key.endsWith(`:${message.threadId}:${content}`)) {
+            recentBridgeSends.delete(key);
+            console.log(`[dedup] Bỏ qua tin echo từ /send: ${content}`);
+            return;
+          }
         }
       }
+
+      const textMsgId = logMessage({ direction, userId: message.threadId, userName: displayName, phone, content, msgType: 'text' });
+      console.log(`[${direction === 'in' ? 'NHẬN' : 'GỬI'}] ${displayName}${phoneSuffix}: ${content}`);
+
+      sendToTelegram(formatTelegramForward(message, direction, phone))
+        .then(() => deleteMessage(textMsgId))
+        .catch((err) => console.error('[forward] Lỗi gửi text:', err.message));
+      return;
     }
 
-    const textMsgId = logMessage({ direction, userId: message.threadId, userName: displayName, content, msgType: 'text' });
-    console.log(`[${direction === 'in' ? 'NHẬN' : 'GỬI'}] ${displayName}: ${content}`);
+    // === XỬ LÝ MEDIA (ảnh / video / sticker) ===
+    const msgType = message.data?.msgType || '';
+    const media = detectMedia(content, msgType);
 
-    sendToTelegram(formatTelegramForward(message, direction))
-      .then(() => deleteMessage(textMsgId))
-      .catch((err) => console.error('[forward] Lỗi gửi text:', err.message));
-    return;
-  }
+    if (media) {
+      const logContent = media.desc || `[${media.type === 'video' ? 'Video' : 'Ảnh'}]`;
+      const mediaMsgId = logMessage({ direction, userId: message.threadId, userName: displayName, phone, content: logContent, msgType: media.type });
+      console.log(`[${direction === 'in' ? 'NHẬN' : 'GỬI'}] ${displayName}${phoneSuffix}: ${logContent}`);
 
-  // === XỬ LÝ MEDIA (ảnh / video / sticker) ===
-  const msgType = message.data?.msgType || '';
-  const media = detectMedia(content, msgType);
+      const time = new Date().toLocaleTimeString('vi-VN');
+      const icon = direction === 'in' ? '📩' : '📤';
+      const label = direction === 'in' ? 'RECEIVED FROM' : 'SENT TO';
+      const caption = `<code>${escapeHtml(time)}</code>\n${icon} <b>${label} ${escapeHtml(displayName)}${escapeHtml(phoneSuffix)}</b>`;
 
-  if (media) {
-    // Log vào SQLite
-    const logContent = media.desc || `[${media.type === 'video' ? 'Video' : 'Ảnh'}]`;
-    const mediaMsgId = logMessage({ direction, userId: message.threadId, userName: displayName, content: logContent, msgType: media.type });
-    console.log(`[${direction === 'in' ? 'NHẬN' : 'GỬI'}] ${displayName}: ${logContent}`);
+      sendMediaToTelegram(media.url, media.type, caption)
+        .then(() => deleteMessage(mediaMsgId))
+        .catch((err) => {
+          console.error(`[forward] Lỗi gửi ${media.type}:`, err.message);
+          if (media.type === 'video') {
+            sendToTelegram(
+              `${caption}\n` +
+              `🎬 <i>[Video — không thể tải xuống, dung lượng quá lớn hoặc URL đã hết hạn]</i>`
+            ).catch(() => {});
+          }
+        });
+      return;
+    }
 
-    // Tạo caption: thời gian + tên người gửi
+    // === LOẠI KHÁC ===
+    console.log(`[${direction === 'in' ? 'NHẬN' : 'GỬI'}] ${displayName}${phoneSuffix}: [message type không xác định]`);
+    const otherMsgId = logMessage({ direction, userId: message.threadId, userName: displayName, phone, content: '[unsupported]', msgType: 'other' });
+
     const time = new Date().toLocaleTimeString('vi-VN');
     const icon = direction === 'in' ? '📩' : '📤';
     const label = direction === 'in' ? 'RECEIVED FROM' : 'SENT TO';
-    const caption = `<code>${escapeHtml(time)}</code>\n${icon} <b>${label} ${escapeHtml(displayName)}</b>`;
-
-    // Gửi media lên Telegram
-    sendMediaToTelegram(media.url, media.type, caption)
-      .then(() => {
-        deleteMessage(mediaMsgId);
-      })
-      .catch((err) => {
-        console.error(`[forward] Lỗi gửi ${media.type}:`, err.message);
-        // Video fail → gửi text notice thay thế (ảnh hiếm khi fail)
-        if (media.type === 'video') {
-          sendToTelegram(
-            `${caption}\n` +
-            `🎬 <i>[Video — không thể tải xuống, dung lượng quá lớn hoặc URL đã hết hạn]</i>`
-          ).catch(() => {});
-        }
-      });
-    return;
+    const fallbackText =
+      `<code>${escapeHtml(time)}</code>\n` +
+      `${icon} <b>${label} ${escapeHtml(displayName)}${escapeHtml(phoneSuffix)}</b>\n` +
+      `📎 [File/Sticker/Link]`;
+    sendToTelegram(fallbackText)
+      .then(() => deleteMessage(otherMsgId))
+      .catch((err) => console.error('[forward] Lỗi gửi fallback:', err.message));
+  } catch (err) {
+    console.error('[handler] Lỗi xử lý tin nhắn:', err?.message || err);
   }
-
-  // === LOẠI KHÁC (link preview, file, v.v.) — log + báo text ===
-  console.log(`[${direction === 'in' ? 'NHẬN' : 'GỬI'}] ${displayName}: [message type không xác định]`);
-  const otherMsgId = logMessage({ direction, userId: message.threadId, userName: displayName, content: '[unsupported]', msgType: 'other' });
-
-  const time = new Date().toLocaleTimeString('vi-VN');
-  const icon = direction === 'in' ? '📩' : '📤';
-  const label = direction === 'in' ? 'RECEIVED FROM' : 'SENT TO';
-  const fallbackText =
-    `<code>${escapeHtml(time)}</code>\n` +
-    `${icon} <b>${label} ${escapeHtml(displayName)}</b>\n` +
-    `📎 [File/Sticker/Link]`;
-  sendToTelegram(fallbackText)
-    .then(() => deleteMessage(otherMsgId))
-    .catch((err) => console.error('[forward] Lỗi gửi fallback:', err.message));
 }
 
 app.post('/send', async (req, res) => {

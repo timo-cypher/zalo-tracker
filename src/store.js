@@ -15,6 +15,7 @@ db.exec(`
     direction TEXT NOT NULL,       -- 'in' (khách nhắn đến) | 'out' (mình nhắn đi)
     user_id TEXT NOT NULL,         -- Zalo user_id của khách
     user_name TEXT,                -- tên hiển thị (nếu Zalo trả về)
+    phone TEXT,                    -- số điện thoại (nếu lấy được)
     content TEXT,                  -- nội dung tin nhắn (text)
     msg_type TEXT,                 -- text | image | sticker | ...
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -27,12 +28,12 @@ db.exec(`
 /**
  * Ghi lại một tin nhắn (đến hoặc đi).
  */
-function logMessage({ direction, userId, userName, content, msgType = 'text' }) {
+function logMessage({ direction, userId, userName, phone, content, msgType = 'text' }) {
   const stmt = db.prepare(`
-    INSERT INTO messages (direction, user_id, user_name, content, msg_type)
-    VALUES (@direction, @userId, @userName, @content, @msgType)
+    INSERT INTO messages (direction, user_id, user_name, phone, content, msg_type)
+    VALUES (@direction, @userId, @userName, @phone, @content, @msgType)
   `);
-  const result = stmt.run({ direction, userId, userName: userName || null, content: content || '', msgType });
+  const result = stmt.run({ direction, userId, userName: userName || null, phone: phone || null, content: content || '', msgType });
   return Number(result.lastInsertRowid); // trả về ID để sau này xoá nếu cần
 }
 
