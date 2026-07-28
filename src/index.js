@@ -133,10 +133,21 @@ function handleIncomingMessage(message) {
     const label = direction === 'in' ? 'RECEIVED FROM' : 'SENT TO';
     const caption = `<code>${escapeHtml(time)}</code>\n${icon} <b>${label} ${escapeHtml(displayName)}</b>`;
 
-    // Gửi media lên Telegram, xoá SQLite nếu thành công
+    // Gửi media lên Telegram
     sendMediaToTelegram(media.url, media.type, caption)
-      .then(() => deleteMessage(mediaMsgId))
-      .catch((err) => console.error(`[forward] Lỗi gửi ${media.type}:`, err.message));
+      .then(() => {
+        deleteMessage(mediaMsgId);
+      })
+      .catch((err) => {
+        console.error(`[forward] Lỗi gửi ${media.type}:`, err.message);
+        // Video fail → gửi text notice thay thế (ảnh hiếm khi fail)
+        if (media.type === 'video') {
+          sendToTelegram(
+            `${caption}\n` +
+            `🎬 <i>[Video — không thể tải xuống, dung lượng quá lớn hoặc URL đã hết hạn]</i>`
+          ).catch(() => {});
+        }
+      });
     return;
   }
 

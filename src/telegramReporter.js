@@ -5,6 +5,34 @@ const { loadSession } = require('./sessionStore');
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
+// Semaphore: chỉ cho phép xử lý 1 video tại một thời điểm
+// để tránh quá tải RAM/connections trên Render free tier
+let videoProcessing = false;
+const videoQueue = [];
+
+/**
+ * Xử lý lần lượt từng video trong hàng đợi.
+ */
+function processNextVideo() {
+  if (videoQueue.length === 0) {
+    videoProcessing = false;
+    return;
+  }
+  videoProcessing = true;
+  const { fileUrl, caption, resolve, reject } = videoQueue.shift();
+  uploadVideo(fileUrl, caption).then(resolve).catch(reject).finally(processNextVideo);
+}
+
+/**
+ * Thêm video vào hàng đợi, đảm bảo chỉ xử lý 1 video/lần.
+ */
+function enqueueVideo(fileUrl, caption) {
+  return new Promise((resolve, reject) => {
+    videoQueue.push({ fileUrl, caption, resolve, reject });
+    if (!videoProcessing) processNextVideo();
+  });
+}
+
 async function sendToTelegram(text) {
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
   // Telegram giới hạn 4096 ký tự/tin nhắn -> cắt thành nhiều phần nếu cần
@@ -109,6 +137,15 @@ async function sendMediaToTelegram(fileUrl, mediaType, caption) {
   }
 
   // === Video — tải về từ Zalo CDN bằng cookies rồi upload lên Telegram ===
+  // Dùng hàng đợi để chỉ xử lý 1 video/lần, tránh quá tải Render free tier
+  return enqueueVideo(fileUrl, truncatedCaption);
+}
+
+/**
+ * Thực tế tải video từ Zalo CDN và upload lên Telegram.
+ * Được gọi bởi processNextVideo(), luôn chạy tối đa 1 lần.
+ */
+async function uploadVideo(fileUrl, truncatedCaption) {
   const session = loadSession();
   const cookieStr = formatCookies(session?.cookie);
 
@@ -117,11 +154,20 @@ async function sendMediaToTelegram(fileUrl, mediaType, caption) {
 
   console.log('[media] Đang tải video từ Zalo CDN...');
 
-  const dlResponse = await axios.get(fileUrl, {
-    responseType: 'stream',
-    headers: dlHeaders,
-    timeout: 60_000,
-  });
+  let dlResponse;
+  try {
+    dlResponse = await axios.get(fileUrl, {
+      responseType: 'stream',
+      headers: dlHeaders,
+      timeout: 60_000,
+    });
+  } catch (err) {
+    // Dọn stream nếu timeout
+    if (err.request && typeof err.request.destroy === 'function') {
+      err.request.destroy();
+    }
+    throw err;
+  }
 
   const ext = (dlResponse.headers['content-type'] || '').includes('video') ? 'mp4' : 'mp4';
 
@@ -138,12 +184,21 @@ async function sendMediaToTelegram(fileUrl, mediaType, caption) {
 
   // Upload lên Telegram
   console.log('[media] Đang upload video lên Telegram...');
-  await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendVideo`, form, {
-    headers: form.getHeaders(),
-    maxContentLength: Infinity,
-    maxBodyLength: Infinity,
-    timeout: 300_000, // 5 phút cho video lớn
-  });
+
+  try {
+    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendVideo`, form, {
+      headers: form.getHeaders(),
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+      timeout: 120_000, // 2 phút — đủ cho video trên Render free tier
+    });
+  } catch (err) {
+    // Dọn form stream
+    if (dlResponse.data && typeof dlResponse.data.destroy === 'function') {
+      dlResponse.data.destroy();
+    }
+    throw err;
+  }
 
   console.log('[media] Video đã gửi lên Telegram thành công.');
 }
