@@ -52,37 +52,33 @@ function formatTelegramForward(message, direction) {
 }
 
 /**
- * Phát hiện loại media từ content object của Zalo message.
- * Zalo video message chứa cả thumbnail (oriUrl) + video URL (fileUrl),
- * nên phải kiểm tra video TRƯỚC để không bị nhận nhầm thành ảnh.
+ * Phát hiện loại media từ content object + msgType của Zalo message.
+ *
+ * Kết quả debug cho thấy:
+ *   - Video:   msgType = "chat.video.msg", content = TAttachmentContent (href=video URL, thumb=thumbnail)
+ *   - Ảnh:     msgType = ?, content có oriUrl/normalUrl/hdUrl (image fields)
+ *   - Sticker:  content có stickerUrl
+ *
  * Trả về { type: 'photo'|'video'|null, url: string|null, desc: string }.
  */
-function detectMedia(content) {
+function detectMedia(content, msgType) {
   if (typeof content !== 'object' || !content) return null;
 
-  // === VIDEO: kiểm tra trước vì video cũng có thumbnail ===
-  const ext = (content.fileName || '').split('.').pop().toLowerCase();
-  const videoExts = ['mp4', 'mov', 'avi', 'mkv', 'webm', '3gp', 'm4v'];
-
-  // Có fileUrl + extension video → chắc chắn là video
-  if (content.fileUrl && typeof content.fileUrl === 'string' && videoExts.includes(ext)) {
-    return { type: 'video', url: content.fileUrl, desc: content.desc || '' };
+  // === Dùng msgType từ Zalo để xác định (ưu tiên cao nhất) ===
+  if (msgType === 'chat.video.msg' && content.href) {
+    return { type: 'video', url: content.href, desc: content.description || '' };
   }
 
-  // Có videoUrl field → video
-  if (content.videoUrl && typeof content.videoUrl === 'string') {
-    return { type: 'video', url: content.videoUrl, desc: content.desc || '' };
+  // === Fallback: href trỏ tới video CDN ===
+  if (content.href && typeof content.href === 'string' &&
+      (content.href.includes('video-') || content.href.includes('/video/'))) {
+    return { type: 'video', url: content.href, desc: content.description || '' };
   }
 
-  // Có fileUrl + duration → video (Zalo đôi khi không gửi extension)
-  if (content.fileUrl && typeof content.fileUrl === 'string' && content.duration) {
-    return { type: 'video', url: content.fileUrl, desc: content.desc || '' };
-  }
-
-  // === ẢNH: có oriUrl / normalUrl / thumb (nhưng không có dấu hiệu video) ===
+  // === ẢNH: oriUrl / normalUrl / hdUrl / thumb ===
   const imgUrl = content.oriUrl || content.normalUrl || content.hdUrl || content.thumb;
   if (imgUrl && typeof imgUrl === 'string') {
-    return { type: 'photo', url: imgUrl, desc: content.desc || '' };
+    return { type: 'photo', url: imgUrl, desc: content.desc || content.description || '' };
   }
 
   // === Sticker ===
@@ -122,16 +118,8 @@ function handleIncomingMessage(message) {
   }
 
   // === XỬ LÝ MEDIA (ảnh / video / sticker) ===
-  const media = detectMedia(content);
-
-  // 🔧 DEBUG TEMP: log raw content của message không phải text
-  // Chỉ log khi detect ra ảnh (để check xem video có bị nhầm không)
-  if (media && media.type === 'photo') {
-    const msgType = message.data?.msgType || '?';
-    const contentKeys = Object.keys(content).join(', ');
-    const contentPreview = JSON.stringify(content).slice(0, 300);
-    console.log('[debug] msgType=' + msgType + ' keys=[' + contentKeys + '] sample=' + contentPreview);
-  }
+  const msgType = message.data?.msgType || '';
+  const media = detectMedia(content, msgType);
 
   if (media) {
     // Log vào SQLite
