@@ -11,78 +11,10 @@ const { sendToTelegram, formatReport, escapeHtml } = require('./telegramReporter
 const app = express();
 app.use(express.json());
 
-// Render chạy sau proxy, cần trust proxy để lấy đúng IP client
 app.set('trust proxy', true);
 
-// === IP Allowlist (chỉ cho health check) ===
-// UptimeRobot cần ping / và /health, nhưng chỉ từ các IP cụ thể.
-// Các route khác (/send, /report/now) vẫn mở cho bạn xài.
-// Set ALLOWED_IPS env var để ghi đè, cách nhau bằng dấu phẩy.
-// Đặt 0.0.0.0/0 để cho phép tất cả (local dev).
-
-function expandIPv6(ip) {
-  // Chuẩn hoá IPv6: giải nén ::, thêm leading zeros, lower case
-  // Ví dụ: 2a01:4ff:2f0:3b3a::1 → 2a01:04ff:02f0:3b3a:0000:0000:0000:0001
-  if (!ip.includes(':')) return ip; // IPv4, không cần xử lý
-  let parts = ip.split(':');
-  const emptyIndex = parts.indexOf('');
-  if (emptyIndex !== -1) {
-    // Đếm số group :: cần thay thế
-    const fillCount = 8 - (parts.length - 1);
-    const fill = Array(fillCount).fill('0000');
-    parts.splice(emptyIndex, parts.lastIndexOf('') - emptyIndex + 1, ...fill);
-  }
-  // Pad mỗi group lên 4 ký tự, lower case
-  return parts.map(g => g.padStart(4, '0').toLowerCase()).join(':');
-}
-
-function ipInList(clientIP, ipList) {
-  // Strip ::ffff: prefix nếu có
-  const raw = clientIP.includes('::ffff:')
-    ? clientIP.replace(/^::ffff:/, '')
-    : clientIP;
-
-  const normalized = raw.includes(':') ? expandIPv6(raw) : raw.toLowerCase();
-
-  return ipList.some(allowed => {
-    // Cho phép CIDR cơ bản: 0.0.0.0/0 = allow all
-    if (allowed === '0.0.0.0/0' || allowed === '::0/0') return true;
-
-    const expanded = allowed.includes(':') ? expandIPv6(allowed) : allowed.toLowerCase();
-    return normalized === expanded;
-  });
-}
-
-const DEFAULT_ALLOWED_IPS = [
-  // UptimeRobot IPv6 — Singapore
-  '2a01:4ff:2f0:3b3a::1',
-  '2a01:4ff:2f0:27de::1',
-  '2a01:4ff:2f0:193c::1',
-  // UptimeRobot IPv6 — Tokyo
-  '2400:6180:100:d0::94b6:4001',
-  '2400:6180:100:d0::94b6:5001',
-  '2400:6180:100:d0::94b6:7001',
-  // UptimeRobot IPv6 — others
-  '2406:da14:94d:8601:9d0d:7754:bedf:e4f5',
-  '2406:da14:94d:8601:b325:ff58:2bba:7934',
-  '2406:da14:94d:8601:db4b:c5ac:2cbe:9a79',
-];
-
-const allowedIPs = (process.env.ALLOWED_IPS || '').trim()
-  ? process.env.ALLOWED_IPS.split(',').map(s => s.trim()).filter(Boolean)
-  : DEFAULT_ALLOWED_IPS;
-
-// Middleware chỉ áp dụng cho health check routes
-const healthCheckIPGuard = (req, res, next) => {
-  if (ipInList(req.ip, allowedIPs)) {
-    return next();
-  }
-  console.log(`[ip-block] Từ chối health check từ IP ${req.ip}`);
-  return res.status(403).json({ ok: false, error: 'IP không được phép' });
-};
-
-app.get('/', healthCheckIPGuard, (_req, res) => res.status(200).json({ ok: true, uptime: process.uptime() }));
-app.get('/health', healthCheckIPGuard, (_req, res) => res.status(200).json({ ok: true, uptime: process.uptime() }));
+app.get('/', (_req, res) => res.status(200).json({ ok: true, uptime: process.uptime() }));
+app.get('/health', (_req, res) => res.status(200).json({ ok: true, uptime: process.uptime() }));
 
 const PORT = process.env.PORT || 3000;
 const REPORT_CRON = process.env.REPORT_CRON || '0 8 * * *';
