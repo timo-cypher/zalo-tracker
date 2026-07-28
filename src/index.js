@@ -124,17 +124,13 @@ function handleIncomingMessage(message) {
   // === XỬ LÝ MEDIA (ảnh / video / sticker) ===
   const media = detectMedia(content);
 
-  // 🔧 DEBUG: log content keys để xem video có field gì
-  if (media && media.type === 'photo' && (!content.oriUrl && !content.normalUrl)) {
-    // Nếu detect là photo nhưng không có oriUrl → debug
-    console.log('[debug] content keys:', Object.keys(content).join(', '));
-  }
-  // 🔧 DEBUG: log cả content nếu là video (để user gửi lại cho tôi)
-  if (typeof content === 'object' && content) {
-    const keys = Object.keys(content);
-    const sample = JSON.stringify(content).slice(0, 500);
-    console.log('[debug] content keys:', keys.join(', '));
-    console.log('[debug] content sample:', sample);
+  // 🔧 DEBUG TEMP: log raw content của message không phải text
+  // Chỉ log khi detect ra ảnh (để check xem video có bị nhầm không)
+  if (media && media.type === 'photo') {
+    const msgType = message.data?.msgType || '?';
+    const contentKeys = Object.keys(content).join(', ');
+    const contentPreview = JSON.stringify(content).slice(0, 300);
+    console.log('[debug] msgType=' + msgType + ' keys=[' + contentKeys + '] sample=' + contentPreview);
   }
 
   if (media) {
