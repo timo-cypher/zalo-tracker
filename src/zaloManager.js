@@ -142,7 +142,7 @@ async function startQrLogin() {
       }
 
       // Lưu session theo ownId để lần sau tự đăng nhập lại
-      saveAccountSession(ownId, {
+      await saveAccountSession(ownId, {
         cookie: flow._loginInfo?.cookie || null,
         imei: flow._loginInfo?.imei || null,
         userAgent: flow._loginInfo?.userAgent || ua,
@@ -150,7 +150,7 @@ async function startQrLogin() {
 
       // Ghi account vào DB TRƯỚC khi start listener — threads có FK
       // account_id -> accounts.id, thiếu bước này sẽ lỗi khi tin nhắn đầu đến
-      store.upsertAccount({ id: ownId, name, avatar });
+      await store.upsertAccount({ id: ownId, name, avatar });
 
       const entry = {
         ownId,
@@ -238,7 +238,7 @@ function attachListenerEvents(entry) {
 
 async function tryRelogin(entry) {
   try {
-    const saved = loadAccountSession(entry.ownId);
+    const saved = await loadAccountSession(entry.ownId);
     if (!saved) throw new Error('Không có session đã lưu');
 
     const zalo = new Zalo({ selfListen: true, checkUpdate: true, logging: false });
@@ -268,7 +268,7 @@ function startListener(entry) {
 // Khởi động: tự đăng nhập lại các session đã lưu
 // ============================================================
 async function restoreSessions() {
-  const sessions = loadAccountSessions();
+  const sessions = await loadAccountSessions();
   const results = [];
   for (const ownId of Object.keys(sessions)) {
     try {
@@ -285,7 +285,7 @@ async function restoreSessions() {
       }
 
       // Đảm bảo account tồn tại trong DB (FK threads.account_id -> accounts.id)
-      store.upsertAccount({ id: ownId, name, avatar });
+      await store.upsertAccount({ id: ownId, name, avatar });
 
       const entry = { ownId, api, listener: api.listener, name, avatar, connected: false };
       accounts.set(ownId, entry);
@@ -301,7 +301,7 @@ async function restoreSessions() {
   return results;
 }
 
-function removeAccountRuntime(ownId) {
+async function removeAccountRuntime(ownId) {
   const entry = accounts.get(ownId);
   if (entry) {
     try {
@@ -311,7 +311,7 @@ function removeAccountRuntime(ownId) {
     }
     accounts.delete(ownId);
   }
-  deleteAccountSession(ownId);
+  await deleteAccountSession(ownId);
 }
 
 module.exports = {

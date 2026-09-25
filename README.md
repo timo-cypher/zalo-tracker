@@ -115,18 +115,42 @@ Không cấu hình R2 = app vẫn chạy bình thường, media sống theo tu�
 | `GET /api/events` | SSE tin nhắn mới theo thời gian thực |
 | `GET /health` | Health check |
 
-## 6. Chạy 24/24
+## 6. Deploy 24/24
 
-Vẫn dùng được PM2 như bản cũ:
+### Phương án A — Hoàn toàn MIỄN PHÍ ($0/tháng)
+
+```
+Render free (app) + Supabase Postgres free (DB) + UptimeRobot (keep-alive)
+```
+
+1. **Supabase**: tạo project tại [supabase.com](https://supabase.com) →
+   Project Settings → Database → copy **Connection string (URI)**.
+2. **Render**: Dashboard → New → **Blueprint** → chọn repo. Điền biến:
+   - `WEB_USER`, `WEB_PASSWORD` (bắt buộc)
+   - `DATABASE_URL` (bắt buộc — URI Supabase vừa copy)
+   - `R2_*` (tuỳ chọn)
+3. **UptimeRobot** ([uptimerobot.com](https://uptimerobot.com), free):
+   thêm HTTP monitor ping `https://<app>.onrender.com/health` mỗi 5 phút.
+
+⚠️ **Bước 3 là bắt buộc**: Render free ngủ sau 15 phút không có traffic —
+WebSocket Zalo đứt và **tin nhắn trong lúc ngủ bị mất vĩnh viễn**. Ping mỗi
+5 phút giữ service luôn thức.
+
+Sau khi deploy: mở web → đăng nhập `WEB_USER`/`WEB_PASSWORD` → quét QR Zalo.
+
+### Phương án B — Ổn định nhất ($7/tháng)
+
+Render **Starter** + persistent disk 1GB: dùng `render.yaml` nhưng đổi
+`plan: free` → `plan: starter` và thêm disk như Blueprint cũ trong git history.
+SQLite chạy local trên disk, không cần DATABASE_URL, không sợ ngủ.
+
+### Chạy local / VPS riêng
 
 ```bash
 pm2 start ecosystem.config.js
 ```
 
-Lưu ý khác bản cũ: **không còn Telegram, không còn cron báo cáo, không gửi
-tin nhắn** — app chỉ là kho lưu trữ + web xem lại. Tin nhắn chỉ được lưu khi
-app đang chạy (zca-js nghe qua WebSocket — thời gian app tắt là mất tin nhắn
-đó).
+Không cần DATABASE_URL — SQLite dùng ngay.
 
 ### Bảo mật web (basic auth)
 

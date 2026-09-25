@@ -1,50 +1,33 @@
-const fs = require('fs');
-const path = require('path');
+/**
+ * Session storage — chọn backend tự động:
+ *   - Có DATABASE_URL -> bảng sessions trong Postgres (free tier không có disk)
+ *   - Không           -> file data/sessions/<ownId>.json (local / có disk)
+ *
+ * Mọi hàm đều async để interface thống nhất.
+ */
+const USE_PG = !!process.env.DATABASE_URL;
+const store = require('./store');
 
-const SESSIONS_DIR = process.env.SESSIONS_DIR || './data/sessions';
+const fileStore = USE_PG ? null : require('./fileSessionStore');
 
-function sessionPath(ownId) {
-  return path.join(SESSIONS_DIR, `${ownId}.json`);
+async function saveAccountSession(ownId, session) {
+  if (USE_PG) return store.saveSession(ownId, session);
+  return fileStore.saveAccountSession(ownId, session);
 }
 
-function saveAccountSession(ownId, session) {
-  fs.mkdirSync(SESSIONS_DIR, { recursive: true });
-  fs.writeFileSync(sessionPath(ownId), JSON.stringify(session, null, 2));
+async function loadAccountSession(ownId) {
+  if (USE_PG) return store.loadSession(ownId);
+  return fileStore.loadAccountSession(ownId);
 }
 
-function loadAccountSession(ownId) {
-  try {
-    return JSON.parse(fs.readFileSync(sessionPath(ownId), 'utf8'));
-  } catch {
-    return null;
-  }
+async function loadAccountSessions() {
+  if (USE_PG) return store.loadAllSessions();
+  return fileStore.loadAccountSessions();
 }
 
-function loadAccountSessions() {
-  const out = {};
-  try {
-    for (const f of fs.readdirSync(SESSIONS_DIR)) {
-      if (!f.endsWith('.json')) continue;
-      try {
-        out[f.replace(/\.json$/, '')] = JSON.parse(
-          fs.readFileSync(path.join(SESSIONS_DIR, f), 'utf8')
-        );
-      } catch {
-        /* skip corrupt file */
-      }
-    }
-  } catch {
-    /* dir chưa tồn tại */
-  }
-  return out;
+async function deleteAccountSession(ownId) {
+  if (USE_PG) return store.deleteSession(ownId);
+  return fileStore.deleteAccountSession(ownId);
 }
 
-function deleteAccountSession(ownId) {
-  try {
-    fs.unlinkSync(sessionPath(ownId));
-  } catch {
-    /* file không tồn tại */
-  }
-}
-
-module.exports = { saveAccountSession, loadAccountSession, loadAccountSessions, deleteAccountSession };
+module.exports = { USE_PG, saveAccountSession, loadAccountSession, loadAccountSessions, deleteAccountSession };

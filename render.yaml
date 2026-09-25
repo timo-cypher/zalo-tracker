@@ -1,36 +1,34 @@
-# Render Blueprint — Zalo Archive v2
-# Deploy: Render Dashboard -> New -> Blueprint -> chọn repo này
+# Render Blueprint — Zalo Archive v2 (FREE stack: $0/tháng)
 #
-# LƯU Ý QUAN TRỌNG:
-# - Plan "starter" là plan rẻ nhất CÓ persistent disk. Plan free KHÔNG có disk
-#   -> SQLite (data/messages.db) và session sẽ MẤT mỗi lần restart.
-# - Sau khi deploy lần đầu: mở URL app, quét QR Zalo để đăng nhập. Session
-#   được lưu vào persistent disk -> các lần restart sau tự đăng nhập lại.
+# Kiến trúc:
+#   Render free     = backend + frontend + WebSocket Zalo
+#   Supabase free   = Postgres (DB + sessions) qua DATABASE_URL
+#   UptimeRobot     = ping /health mỗi 5 phút để service không ngủ
+#                     (ngủ = mất tin nhắn realtime!)
+#   Cloudflare R2   = (tuỳ chọn) media vĩnh viễn
+#
+# Deploy: Render Dashboard -> New -> Blueprint -> chọn repo này
 services:
   - type: web
     name: zalo-archive
     runtime: node
-    plan: starter          # đổi thành "free" nếu chấp nhận mất DB khi restart
-    region: singapore      # gần Việt Nam nhất
+    plan: free             # $0 — NHỚ setup UptimeRobot (xem README mục Deploy)
+    region: singapore
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /health
-    disk:
-      name: zalo-data
-      mountPath: /opt/render/project/src/data   # Node source dir = /opt/render/project/src (docs Render)
-      sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
       # ===== Bảo mật web (BẮT BUỘC khi deploy công khai) =====
       - key: WEB_USER
-        sync: false        # điền trong dashboard (vd: zalo)
+        sync: false
       - key: WEB_PASSWORD
-        sync: false        # điền trong dashboard — KHÔNG để trống!
-      # ===== Zalo session bootstrap (tuỳ chọn) =====
-      # Copy từ data/session_base64.txt sau lần quét QR đầu tiên ở máy local.
-      # Nếu bỏ trống: mở web trên Render và quét QR trực tiếp cũng được.
-      - key: SESSION_JSON_BASE64
+        sync: false
+      # ===== Database (Supabase Postgres — BẮT BUỘC trên free plan) =====
+      # Supabase Dashboard -> Project Settings -> Database -> Connection string
+      # (URI, dùng pooler connection cho serverless-free)
+      - key: DATABASE_URL
         sync: false
       # ===== Cloudflare R2 archive media (tuỳ chọn) =====
       - key: R2_ACCOUNT_ID

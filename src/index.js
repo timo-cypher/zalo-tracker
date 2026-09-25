@@ -1,5 +1,6 @@
 require('dotenv').config();
 
+const store = require('./store');
 const { setOnMessage, restoreSessions } = require('./zaloManager');
 const { handleMessage } = require('./ingest');
 const app = require('./server');
@@ -10,8 +11,12 @@ const PORT = process.env.PORT || 3000;
 setOnMessage(handleMessage);
 
 async function main() {
+  // Postgres: tạo schema nếu chưa có (SQLite tự tạo lúc require)
+  await store.init();
+
   app.listen(PORT, () => {
     console.log(`Web server đang chạy tại http://localhost:${PORT}`);
+    console.log(`DB backend: ${store.isPostgres ? 'Postgres (DATABASE_URL)' : 'SQLite (local)'}`);
     console.log('Mở trình duyệt để đăng nhập Zalo bằng QR và xem tin nhắn.');
   });
 

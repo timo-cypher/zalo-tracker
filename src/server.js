@@ -101,23 +101,27 @@ app.post('/api/auth/qr/cancel', (_req, res) => {
 // ============================================================
 // Accounts
 // ============================================================
-app.get('/api/accounts', (_req, res) => {
-  const runtime = new Map(zaloManager.listAccounts().map((a) => [a.ownId, a]));
-  const dbAccounts = store.getAccounts();
-  const merged = dbAccounts.map((a) => ({
-    id: a.id,
-    name: a.name,
-    avatar: a.avatar,
-    connected: runtime.get(a.id)?.connected || false,
-  }));
-  res.json(merged);
+app.get('/api/accounts', async (_req, res) => {
+  try {
+    const runtime = new Map(zaloManager.listAccounts().map((a) => [a.ownId, a]));
+    const dbAccounts = await store.getAccounts();
+    const merged = dbAccounts.map((a) => ({
+      id: a.id,
+      name: a.name,
+      avatar: a.avatar,
+      connected: runtime.get(a.id)?.connected || false,
+    }));
+    res.json(merged);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.delete('/api/accounts/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    zaloManager.removeAccountRuntime(id); // dừng listener + xoá session file
-    store.removeAccount(id); // xoá account + threads + messages (cascade)
+    await zaloManager.removeAccountRuntime(id); // dừng listener + xoá session
+    await store.removeAccount(id); // xoá account + threads + messages
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -127,13 +131,14 @@ app.delete('/api/accounts/:id', async (req, res) => {
 // ============================================================
 // Threads (chat heads)
 // ============================================================
-app.get('/api/threads', (req, res) => {
+app.get('/api/threads', async (req, res) => {
+  try {
   const { accountId, includeUntracked } = req.query;
   if (!accountId) return res.status(400).json({ error: 'accountId là bắt buộc' });
 
   const rows = includeUntracked === '1'
-    ? store.getAllThreads(accountId)
-    : store.getTrackedThreads(accountId);
+    ? await store.getAllThreads(accountId)
+    : await store.getTrackedThreads(accountId);
 
   const threads = rows.map((t) => ({
     key: t.id,
@@ -147,13 +152,17 @@ app.get('/api/threads', (req, res) => {
     isTracked: t.is_tracked === 1,
   }));
   res.json(threads);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Danh sách thread đã bị gỡ vĩnh viễn (blacklist) — để UI có thể hoàn tác
-app.get('/api/threads/removed', (req, res) => {
+app.get('/api/threads/removed', async (req, res) => {
+  try {
   const { accountId } = req.query;
   if (!accountId) return res.status(400).json({ error: 'accountId là bắt buộc' });
-  const rows = store.getRemovedThreads(accountId);
+  const rows = await store.getRemovedThreads(accountId);
   res.json(rows.map((t) => ({
     key: t.id,
     threadId: t.thread_id,
@@ -161,11 +170,14 @@ app.get('/api/threads/removed', (req, res) => {
     name: t.name || t.thread_id,
     removedAt: t.removed_at,
   })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Cho phép thread bị gỡ vĩnh viễn quay lại (khi có tin nhắn mới)
-app.post('/api/threads/:key/unremove', (req, res) => {
-  store.unremoveThread(req.params.key);
+app.post('/api/threads/:key/unremove', async (req, res) => {
+  await store.unremoveThread(req.params.key);
   res.json({ ok: true });
 });
 
@@ -193,7 +205,7 @@ app.post('/api/threads/:key/refresh', async (req, res) => {
       return res.status(502).json({ error: 'Zalo không trả về thông tin — thử lại sau' });
     }
 
-    store.upsertThread({
+    await store.upsertThread({
       accountId: thread.account_id,
       threadId: thread.thread_id,
       threadType: thread.thread_type,
@@ -202,7 +214,7 @@ app.post('/api/threads/:key/refresh', async (req, res) => {
       phone: meta.phone,
     });
 
-    const updated = store.getThreadByKey(thread.id);
+    const updated = await store.getThreadByKey(thread.id);
     res.json({
       ok: true,
       thread: {
@@ -229,7 +241,7 @@ app.post('/api/threads/refresh-all', async (req, res) => {
     const entry = zaloManager.getAccount(accountId);
     if (!entry) return res.status(400).json({ error: 'Tài khoản chưa đăng nhập' });
 
-    const threads = store.getAllThreads(accountId);
+    const threads = await store.getAllThreads(accountId);
     const results = [];
     for (const t of threads) {
       const isGroup = t.thread_type === ThreadType.Group;
@@ -248,7 +260,7 @@ app.post('/api/threads/refresh-all', async (req, res) => {
           force: nameCorrupted, // tên lỗi -> force; chỉ thiếu phone -> dùng quy tắc 1 lần
         });
         if (meta.name || meta.avatar || meta.phone) {
-          store.upsertThread({
+          await store.upsertThread({
             accountId,
             threadId: t.thread_id,
             threadType: t.thread_type,
@@ -275,16 +287,20 @@ app.post('/api/threads/refresh-all', async (req, res) => {
 });
 
 // Bỏ theo dõi / theo dõi lại một thread
-app.post('/api/threads/:key/tracking', (req, res) => {
+app.post('/api/threads/:key/tracking', async (req, res) => {
+  try {
   const { key } = req.params;
   const tracked = req.body?.tracked;
   if (typeof tracked !== 'boolean') {
     return res.status(400).json({ error: 'body.tracked (boolean) là bắt buộc' });
   }
-  const thread = store.getThreadByKey(key);
+  const thread = await store.getThreadByKey(key);
   if (!thread) return res.status(404).json({ error: 'Không tìm thấy thread' });
-  store.setThreadTracking(key, tracked);
+  await store.setThreadTracking(key, tracked);
   res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /**
@@ -292,29 +308,40 @@ app.post('/api/threads/:key/tracking', (req, res) => {
  * ghi vào blacklist — thread này sẽ KHÔNG xuất hiện lại dù có tin nhắn mới
  * (trừ khi bấm "Cho phép quay lại" trong mục Đã gỡ của Quản lý theo dõi).
  */
-app.delete('/api/threads/:key', (req, res) => {
-  const key = req.params.key;
-  store.removeThreadPermanently(key);
+app.delete('/api/threads/:key', async (req, res) => {
+  try {
+  await store.removeThreadPermanently(req.params.key);
   res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ============================================================
 // Messages
 // ============================================================
-app.get('/api/messages', (req, res) => {
+app.get('/api/messages', async (req, res) => {
+  try {
   const { threadKey, before, limit } = req.query;
   if (!threadKey) return res.status(400).json({ error: 'threadKey là bắt buộc' });
-  const msgs = store.getMessages(threadKey, {
+  const msgs = await store.getMessages(threadKey, {
     before: before ? Number(before) : undefined,
     limit: Math.min(Number(limit) || 50, 200),
   });
   res.json(msgs);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.get('/api/messages/count', (req, res) => {
+app.get('/api/messages/count', async (req, res) => {
+  try {
   const { threadKey } = req.query;
   if (!threadKey) return res.status(400).json({ error: 'threadKey là bắt buộc' });
-  res.json({ count: store.countMessages(threadKey) });
+  res.json({ count: await store.countMessages(threadKey) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ============================================================

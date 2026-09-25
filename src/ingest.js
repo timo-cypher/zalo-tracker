@@ -19,7 +19,7 @@ async function handleMessage(entry, message) {
     const threadId = message.threadId;
 
     // 1. Bỏ qua nếu thread đã bị gỡ khỏi hệ thống theo dõi
-    if (!store.isThreadTracked(accountId, threadId, threadType)) {
+    if (!(await store.isThreadTracked(accountId, threadId, threadType))) {
       return;
     }
 
@@ -31,9 +31,9 @@ async function handleMessage(entry, message) {
     //    - Không gọi API lại nếu đã có đủ dữ liệu (phone chỉ lấy 1 lần)
     //    - Phát hiện tên bị lỗi (trùng tên tài khoản của chính mình) để sửa
     const candidateKey = `${accountId}:${threadId}:${threadType}`;
-    const existingRow = store.getThreadByKey(candidateKey);
+    const existingRow = await store.getThreadByKey(candidateKey);
     const ownerName =
-      entry.name || store.getAccounts().find((a) => a.id === accountId)?.name || null;
+      entry.name || (await store.getAccounts()).find((a) => a.id === accountId)?.name || null;
 
     const meta = await fetchThreadMeta(entry, threadId, isGroup, {
       existing: existingRow,
@@ -41,9 +41,9 @@ async function handleMessage(entry, message) {
     });
 
     // Đảm bảo account tồn tại trong DB (FK threads.account_id -> accounts.id)
-    store.upsertAccount({ id: accountId, name: entry.name, avatar: entry.avatar });
+    await store.upsertAccount({ id: accountId, name: entry.name, avatar: entry.avatar });
 
-    const threadKey = store.upsertThread({
+    const threadKey = await store.upsertThread({
       accountId,
       threadId,
       threadType,
@@ -53,7 +53,7 @@ async function handleMessage(entry, message) {
     });
 
     // Thread có thể bị gỡ tracking giữa chừng (race) — kiểm tra lại
-    const threadRow = store.getThreadByKey(threadKey);
+    const threadRow = await store.getThreadByKey(threadKey);
     if (!threadRow || threadRow.is_tracked !== 1) return;
 
     // 4. Tên NGƯỜI GỬI tin nhắn này (khác tên thread — quan trọng trong nhóm
@@ -98,7 +98,7 @@ async function handleMessage(entry, message) {
     const msgId = data.msgId ? String(data.msgId) : data.cliMsgId ? String(data.cliMsgId) : null;
     const createdAt = new Date(Number(data.ts) || Date.now()).toISOString();
 
-    const id = store.insertMessage({
+    const id = await store.insertMessage({
       accountId,
       threadKey,
       msgId,
@@ -116,7 +116,7 @@ async function handleMessage(entry, message) {
       return;
     }
 
-    store.updateThreadPreview(threadKey, content.slice(0, 100), createdAt);
+    await store.updateThreadPreview(threadKey, content.slice(0, 100), createdAt);
 
     // 7. Đẩy đến web UI qua SSE
     events.emitMessage({
