@@ -183,6 +183,57 @@ async function getMediaStream(key, range) {
 }
 
 /**
+ * Xóa một object khỏi R2 (S3 DELETE).
+ * R2 trả 204 khi xóa thành công, 404 nếu object không tồn tại — cả hai coi như OK.
+ * @returns {Promise<boolean>} true nếu xóa được (hoặc object không tồn tại)
+ */
+async function deleteMedia(key) {
+  if (!isConfigured()) return false;
+  const { accountId, bucket } = cfg();
+
+  const host = `${accountId}.r2.cloudflarestorage.com`;
+  const path = `/${bucket}/${key}`;
+
+  const { headers, url } = signRequest({ method: 'DELETE', host, path, body: '' });
+
+  try {
+    await axios.delete(url, { headers, timeout: 60_000 });
+    return true;
+  } catch (err) {
+    const status = err?.response?.status;
+    if (status === 404) return true; // object không tồn tại — coi như đã xóa
+    console.error('[r2] Xóa thất bại:', status || '', err?.message);
+    return false;
+  }
+}
+
+/**
+ * Xóa hàng loạt media từ danh sách media_url dạng "r2://key" (bỏ qua URL khác).
+ * Chạy nền, không throw — dùng khi gỡ vĩnh viễn thread/account để không để
+ * lại object mồ côi chiếm dung lượng R2.
+ * @param {string[]} mediaUrls mảng media_url lấy từ DB trước khi xóa rows
+ * @returns {Promise<{deleted: number, failed: number}>}
+ */
+async function deleteR2Media(mediaUrls) {
+  const keys = (mediaUrls || [])
+    .filter((u) => typeof u === 'string' && u.startsWith('r2://'))
+    .map((u) => u.slice('r2://'.length))
+    .filter(Boolean);
+  if (!keys.length || !isConfigured()) return { deleted: 0, failed: 0 };
+
+  // Xóa tuần tự với ít concurrency để không dồn R2 rate limit
+  let deleted = 0;
+  let failed = 0;
+  for (const key of keys) {
+    const ok = await deleteMedia(key);
+    if (ok) deleted++;
+    else failed++;
+  }
+  if (keys.length) console.log(`[r2] Đã xóa ${deleted}/${keys.length} object khỏi bucket`);
+  return { deleted, failed };
+}
+
+/**
  * Nếu bucket public (R2_PUBLIC_BASE được set), trả URL trực tiếp —
  * nhanh hơn và giảm tải cho server.
  */
@@ -192,4 +243,4 @@ function getPublicUrl(key) {
   return `${publicBase.replace(/\/$/, '')}/${key}`;
 }
 
-module.exports = { isConfigured, uploadMedia, getMediaStream, getPublicUrl };
+module.exports = { isConfigured, uploadMedia, getMediaStream, getPublicUrl, deleteMedia, deleteR2Media };

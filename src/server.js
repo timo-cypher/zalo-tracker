@@ -121,7 +121,11 @@ app.delete('/api/accounts/:id', async (req, res) => {
   try {
     const { id } = req.params;
     await zaloManager.removeAccountRuntime(id); // dừng listener + xoá session
-    await store.removeAccount(id); // xoá account + threads + messages
+    const r2Media = await store.removeAccount(id); // xoá account + threads + messages
+    // Xoá nốt media đã archive trên R2 (nền — không chặn response)
+    if (r2Media?.length) {
+      mediaStore.deleteR2Media(r2Media).catch((e) => console.error('[r2] Dọn media account lỗi:', e?.message));
+    }
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -310,7 +314,11 @@ app.post('/api/threads/:key/tracking', async (req, res) => {
  */
 app.delete('/api/threads/:key', async (req, res) => {
   try {
-  await store.removeThreadPermanently(req.params.key);
+  const r2Media = await store.removeThreadPermanently(req.params.key);
+  // Xoá nốt media đã archive trên R2 (nền — không chặn response)
+  if (r2Media?.length) {
+    mediaStore.deleteR2Media(r2Media).catch((e) => console.error('[r2] Dọn media thread lỗi:', e?.message));
+  }
   res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

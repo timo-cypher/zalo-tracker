@@ -196,10 +196,19 @@ function getAccounts() {
   return db.prepare(`SELECT * FROM accounts ORDER BY created_at ASC`).all();
 }
 
+/**
+ * Xoá account + toàn bộ dữ liệu. Trả về danh sách media_url (r2://...) để
+ * caller xóa nốt object trên R2 (nếu không sẽ thành rác mồ côi).
+ */
 function removeAccount(id) {
   // Bảng messages không có FK constraint nên phải xoá thủ công:
   // theo thread_key của account này (cascade qua threads không phủ messages)
   const threadKeys = db.prepare('SELECT id FROM threads WHERE account_id = ?').all(id).map((t) => t.id);
+  const mediaUrls = db
+    .prepare("SELECT media_url FROM messages WHERE account_id = ? AND media_url LIKE 'r2://%'")
+    .all(id)
+    .map((r) => r.media_url)
+    .filter(Boolean);
   db.transaction(() => {
     for (const key of threadKeys) {
       db.prepare('DELETE FROM messages WHERE thread_key = ?').run(key);
@@ -208,6 +217,7 @@ function removeAccount(id) {
     db.prepare('DELETE FROM removed_threads WHERE account_id = ?').run(id);
     db.prepare('DELETE FROM accounts WHERE id = ?').run(id); // cascade xoá threads
   })();
+  return mediaUrls;
 }
 
 // ============================================================
@@ -249,9 +259,15 @@ function setThreadTracking(threadKey, tracked) {
 /**
  * Gỡ vĩnh viễn: xoá thread + dữ liệu, và ghi nhớ vào blacklist để thread
  * này KHÔNG bao giờ tự xuất hiện lại dù có tin nhắn mới.
+ * Trả về danh sách media_url (r2://...) thu thập TRƯỚC khi xoá rows.
  */
 function removeThreadPermanently(threadKey) {
   const thread = getThreadByKey(threadKey);
+  const mediaUrls = db
+    .prepare("SELECT media_url FROM messages WHERE thread_key = ? AND media_url LIKE 'r2://%'")
+    .all(threadKey)
+    .map((r) => r.media_url)
+    .filter(Boolean);
   db.prepare('DELETE FROM messages WHERE thread_key = ?').run(threadKey);
   db.prepare('DELETE FROM threads WHERE id = ?').run(threadKey);
   if (thread) {
@@ -275,6 +291,7 @@ function removeThreadPermanently(threadKey) {
       );
     }
   }
+  return mediaUrls;
 }
 
 /**

@@ -171,10 +171,18 @@ async function getAccounts() {
   return rows.map(rowToAccount);
 }
 
+/**
+ * Xoá account + toàn bộ dữ liệu. Trả về danh sách media_url (r2://...) để
+ * caller xóa nốt object trên R2 (nếu không sẽ thành rác mồ côi).
+ */
 async function removeAccount(id) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const { rows: mediaRows } = await client.query(
+      "SELECT media_url FROM messages WHERE account_id = $1 AND media_url LIKE 'r2://%'",
+      [id]
+    );
     const { rows } = await client.query('SELECT id FROM threads WHERE account_id = $1', [id]);
     for (const t of rows) {
       await client.query('DELETE FROM messages WHERE thread_key = $1', [t.id]);
@@ -184,6 +192,7 @@ async function removeAccount(id) {
     await client.query('DELETE FROM sessions WHERE own_id = $1', [id]);
     await client.query('DELETE FROM accounts WHERE id = $1', [id]); // cascade threads
     await client.query('COMMIT');
+    return mediaRows.map((r) => r.media_url).filter(Boolean);
   } catch (e) {
     await client.query('ROLLBACK');
     throw e;
@@ -221,10 +230,18 @@ async function setThreadTracking(threadKey, tracked) {
   await pool.query('UPDATE threads SET is_tracked = $2 WHERE id = $1', [threadKey, tracked ? 1 : 0]);
 }
 
+/**
+ * Gỡ vĩnh viễn thread. Trả về danh sách media_url (r2://...) đã thu thập
+ * TRƯỚC khi xoá rows — caller dùng để xóa object trên R2.
+ */
 async function removeThreadPermanently(threadKey) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const { rows: mediaRows } = await client.query(
+      "SELECT media_url FROM messages WHERE thread_key = $1 AND media_url LIKE 'r2://%'",
+      [threadKey]
+    );
     const { rows } = await client.query('SELECT * FROM threads WHERE id = $1', [threadKey]);
     await client.query('DELETE FROM messages WHERE thread_key = $1', [threadKey]);
     await client.query('DELETE FROM threads WHERE id = $1', [threadKey]);
@@ -252,6 +269,7 @@ async function removeThreadPermanently(threadKey) {
       );
     }
     await client.query('COMMIT');
+    return mediaRows.map((r) => r.media_url).filter(Boolean);
   } catch (e) {
     await client.query('ROLLBACK');
     throw e;
