@@ -161,6 +161,9 @@ function renderThreadList() {
 async function openThread(t) {
   state.currentThread = t;
   document.querySelector('.app').classList.add('chat-open');
+  // Lịch sử trình duyệt: nút back/cử chỉ vuốt của điện thoại quay lại danh sách
+  if (history.state && history.state.chatOpen) history.replaceState({ chatOpen: true }, '');
+  else history.pushState({ chatOpen: true }, '');
   renderThreadList(); // update active highlight
 
   $('chat-empty').classList.add('hidden');
@@ -599,9 +602,12 @@ async function renderManageList() {
 
 function showChatPlaceholder() {
   document.querySelector('.app').classList.remove('chat-open');
+  $('thread-menu').classList.add('hidden');
   $('chat-view').classList.add('hidden');
   $('chat-empty').classList.remove('hidden');
   state.currentThread = null;
+  // Xoá trạng thái chatOpen khỏi entry hiện tại để back không bị dư một nhịp
+  if (history.state && history.state.chatOpen) history.replaceState({}, '');
 }
 
 // ============================================================
@@ -693,6 +699,20 @@ $('btn-refresh-all').onclick = async () => {
 $('btn-qr-retry').onclick = openQrModal;
 
 $('btn-thread-menu').onclick = () => $('thread-menu').classList.toggle('hidden');
+
+// Nút back trong khung chat (mobile) + nút back/cử chỉ của trình duyệt
+$('btn-back').onclick = () => {
+  if (history.state && history.state.chatOpen) history.back(); // popstate sẽ gọi showChatPlaceholder
+  else showChatPlaceholder();
+};
+window.addEventListener('popstate', () => {
+  if (
+    !(history.state && history.state.chatOpen) &&
+    document.querySelector('.app').classList.contains('chat-open')
+  ) {
+    showChatPlaceholder();
+  }
+});
 
 $('btn-refresh-name').onclick = async () => {
   const t = state.currentThread;

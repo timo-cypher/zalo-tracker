@@ -264,6 +264,15 @@ button { font-family: inherit; cursor: pointer; }
   border-bottom: 1px solid var(--border);
   position: relative;
 }
+
+/* Nút back trong khung chat — chỉ hiện trên mobile (sidebar ẩn) */
+.btn-back { display: none; font-size: 22px; margin-left: -8px; }
+
+/* Tap highlight + tap target thân thiện mobile */
+@media (hover: none) {
+  .thread-item, .menu-item, .icon-btn, .account-chip { -webkit-tap-highlight-color: transparent; }
+  .thread-item:active { background: #e8f2ff; }
+}
 .chat-avatar {
   width: 40px;
   height: 40px;
@@ -524,4 +533,27 @@ button { font-family: inherit; cursor: pointer; }
   .chat-panel { display: none; }
   .app.chat-open .sidebar { display: none; }
   .app.chat-open .chat-panel { display: flex; }
+
+  .btn-back { display: inline-flex; }
+
+  /* Tận dụng hết chiều rộng màn hình cho phần nội dung */
+  .chat-header { padding: 8px 12px; }
+  .chat-name { font-size: 15px; }
+  .message-list { padding: 12px 10px 8px; }
+
+  /* Bubble rộng hơn — màn hình nhỏ thì khoảng 86% chiều rộng */
+  .msg-bubble { max-width: 86%; }
+  .msg-media { max-width: min(78vw, 280px); max-height: 60vh; }
+  .msg-media.video { width: min(78vw, 280px); }
+
+  /* Cột phải của header đang dính sát mép phải (nút ⋮) */
+  .thread-menu { right: 8px; }
+
+  /* Modal gần full-màn, thoáng hơn trên điện thoại */
+  .modal { padding: 18px; max-height: 92vh; }
+  .modal-wide { width: 100%; max-width: 94vw; }
+
+  /* Sidebar header gọn lại trên mobile */
+  .sidebar-header { padding: 10px 12px; }
+  .search-input { margin: 8px 12px; }
 }
