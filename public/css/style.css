@@ -556,4 +556,18 @@ button { font-family: inherit; cursor: pointer; }
   /* Sidebar header gọn lại trên mobile */
   .sidebar-header { padding: 10px 12px; }
   .search-input { margin: 8px 12px; }
+
+  /* Quản lý theo dõi: tên + trạng thái ở hàng trên, nút xuống hàng dưới căn phải
+     (trước đây 3 nút chiếm hết chỗ khiến tên bị cắt thành 1-2 ký tự) */
+  .manage-item { flex-wrap: wrap; }
+  .manage-item .manage-actions {
+    width: 100%;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .manage-actions button {
+    padding: 8px 14px;
+    font-size: 13px;
+  }
 }
