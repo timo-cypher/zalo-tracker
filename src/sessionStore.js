@@ -1,66 +1,50 @@
 const fs = require('fs');
 const path = require('path');
 
-const SESSION_PATH = process.env.SESSION_PATH || './data/session.json';
+const SESSIONS_DIR = process.env.SESSIONS_DIR || './data/sessions';
 
-function saveSession({ cookie, imei, userAgent }) {
-  fs.mkdirSync(path.dirname(SESSION_PATH), { recursive: true });
-  fs.writeFileSync(SESSION_PATH, JSON.stringify({ cookie, imei, userAgent }, null, 2));
+function sessionPath(ownId) {
+  return path.join(SESSIONS_DIR, `${ownId}.json`);
 }
 
-function loadSession() {
-  // Ưu tiên 1: file session đã có sẵn trên đĩa (persistent disk, hoặc chạy local)
-  if (fs.existsSync(SESSION_PATH)) {
-    try {
-      return JSON.parse(fs.readFileSync(SESSION_PATH, 'utf8'));
-    } catch {
-      /* file hỏng, thử fallback bên dưới */
-    }
-  }
-
-  // Ưu tiên 2: bootstrap từ biến môi trường SESSION_JSON_BASE64 — dùng khi
-  // deploy lên Render/nơi không có sẵn file session và không muốn phụ thuộc
-  // persistent disk. Cách tạo giá trị này:
-  //   base64 -c data/session.json   (macOS: base64 data/session.json)
-  // rồi dán kết quả vào env var SESSION_JSON_BASE64 trên Render dashboard.
-  const b64 = process.env.SESSION_JSON_BASE64;
-  if (b64) {
-    try {
-      const decoded = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
-      saveSession(decoded); // ghi ra đĩa để lần sau đọc trực tiếp, không cần decode lại
-      console.log('Đã khởi tạo session từ biến môi trường SESSION_JSON_BASE64.');
-      return decoded;
-    } catch (err) {
-      console.warn('SESSION_JSON_BASE64 không hợp lệ:', err.message);
-    }
-  }
-
-  return null;
+function saveAccountSession(ownId, session) {
+  fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+  fs.writeFileSync(sessionPath(ownId), JSON.stringify(session, null, 2));
 }
 
-function clearSession() {
-  if (fs.existsSync(SESSION_PATH)) fs.unlinkSync(SESSION_PATH);
-}
-
-const BASE64_PATH = process.env.SESSION_BASE64_PATH || './data/session_base64.txt';
-
-/**
- * Đọc file session.json và ghi ra file text chứa base64,
- * để người dùng copy dán vào Render dashboard không cần gõ tay.
- */
-function saveSessionBase64() {
+function loadAccountSession(ownId) {
   try {
-    if (!fs.existsSync(SESSION_PATH)) {
-      console.warn('[session] Không tìm thấy session.json để tạo base64.');
-      return;
-    }
-    const data = fs.readFileSync(SESSION_PATH);
-    const b64 = data.toString('base64');
-    fs.writeFileSync(BASE64_PATH, b64, 'utf8');
-    console.log(`[session] Đã lưu base64 session vào ${path.resolve(BASE64_PATH)}`);
-  } catch (err) {
-    console.error('[session] Lỗi khi tạo file base64:', err.message);
+    return JSON.parse(fs.readFileSync(sessionPath(ownId), 'utf8'));
+  } catch {
+    return null;
   }
 }
 
-module.exports = { saveSession, loadSession, clearSession, saveSessionBase64 };
+function loadAccountSessions() {
+  const out = {};
+  try {
+    for (const f of fs.readdirSync(SESSIONS_DIR)) {
+      if (!f.endsWith('.json')) continue;
+      try {
+        out[f.replace(/\.json$/, '')] = JSON.parse(
+          fs.readFileSync(path.join(SESSIONS_DIR, f), 'utf8')
+        );
+      } catch {
+        /* skip corrupt file */
+      }
+    }
+  } catch {
+    /* dir chưa tồn tại */
+  }
+  return out;
+}
+
+function deleteAccountSession(ownId) {
+  try {
+    fs.unlinkSync(sessionPath(ownId));
+  } catch {
+    /* file không tồn tại */
+  }
+}
+
+module.exports = { saveAccountSession, loadAccountSession, loadAccountSessions, deleteAccountSession };

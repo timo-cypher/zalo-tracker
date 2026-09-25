@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zalo Archive</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <!-- Màn hình chờ: chưa có tài khoản nào -->
+  <div id="empty-screen" class="empty-screen hidden">
+    <div class="empty-card">
+      <div class="empty-logo">💬</div>
+      <h1>Zalo Archive</h1>
+      <p>Chưa có tài khoản Zalo nào được kết nối.</p>
+      <button id="btn-open-login" class="btn-primary">Đăng nhập bằng QR</button>
+    </div>
+  </div>
+
+  <!-- Ứng dụng chính -->
+  <div id="app" class="app hidden">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <header class="sidebar-header">
+        <div class="sidebar-title">💬 Zalo Archive</div>
+        <div class="sidebar-actions">
+          <button id="btn-add-account" class="icon-btn" title="Thêm tài khoản">＋</button>
+          <button id="btn-manage" class="icon-btn" title="Quản lý theo dõi">⚙</button>
+          <button id="btn-logout" class="icon-btn" title="Đăng xuất khỏi web">⎋</button>
+        </div>
+      </header>
+
+      <!-- Chuyển tài khoản (chat head của chính mình) -->
+      <div id="account-bar" class="account-bar"></div>
+
+      <input id="search-input" class="search-input" type="text" placeholder="Tìm kiếm tin nhắn..." />
+
+      <div id="thread-list" class="thread-list"></div>
+    </aside>
+
+    <!-- Khung chat -->
+    <main class="chat-panel">
+      <div id="chat-empty" class="chat-empty">
+        <div class="chat-empty-icon">📱</div>
+        <p>Chọn một cuộc trò chuyện để xem</p>
+      </div>
+
+      <div id="chat-view" class="chat-view hidden">
+        <header class="chat-header">
+          <img id="chat-avatar" class="chat-avatar" src="" alt="" />
+          <div class="chat-header-info">
+            <div id="chat-name" class="chat-name"></div>
+            <div id="chat-sub" class="chat-sub"></div>
+          </div>
+          <button id="btn-thread-menu" class="icon-btn" title="Tùy chọn">⋮</button>
+          <div id="thread-menu" class="thread-menu hidden">
+            <button id="btn-refresh-name" class="menu-item">🔄 Làm mới tên từ Zalo</button>
+            <button id="btn-stop-tracking" class="menu-item">🚫 Bỏ theo dõi cuộc trò chuyện này</button>
+            <button id="btn-delete-thread" class="menu-item danger">🗑 Xoá khỏi hệ thống (kèm dữ liệu)</button>
+          </div>
+        </header>
+
+        <div id="message-list" class="message-list"></div>
+        <div id="load-more" class="load-more hidden">
+          <button class="btn-secondary">Xem tin nhắn cũ hơn</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Modal đăng nhập QR -->
+  <div id="qr-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Đăng nhập Zalo</h2>
+        <button class="icon-btn" id="btn-close-qr">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-hint">Mở app Zalo trên điện thoại → <b>Cài đặt → Thiết bị đăng nhập → Quét mã QR</b></p>
+        <div class="qr-wrap">
+          <img id="qr-image" class="qr-image" src="" alt="QR code" />
+          <div id="qr-overlay" class="qr-overlay hidden">
+            <div id="qr-overlay-text" class="qr-overlay-text"></div>
+            <button id="btn-qr-retry" class="btn-secondary hidden">Quét lại</button>
+          </div>
+          <div id="qr-spinner" class="qr-spinner"></div>
+        </div>
+        <div id="qr-status" class="qr-status">Đang tạo mã QR...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal quản lý theo dõi -->
+  <div id="manage-modal" class="modal-overlay hidden">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <h2>Quản lý theo dõi</h2>
+        <button class="icon-btn" id="btn-close-manage">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-hint">Bỏ theo dõi: ngừng lưu tin nhắn mới. Xoá: gỡ hẳn khỏi hệ thống (kèm toàn bộ tin nhắn đã lưu).</p>
+        <button id="btn-refresh-all" class="btn-secondary" style="margin-bottom: 14px;">🔄 Làm mới tất cả tên &amp; SĐT từ Zalo</button>
+        <div id="manage-list" class="manage-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

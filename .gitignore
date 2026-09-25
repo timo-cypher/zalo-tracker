@@ -2,7 +2,10 @@ node_modules/
 .env
 .env.example
 data/*.db
+data/*.db-*
+data/sessions/
 data/session.json
 data/session_base64.txt
 logs/*.log
+qr.png
 .qr.png

@@ -1,0 +1,45 @@
+# Render Blueprint — Zalo Archive v2
+# Deploy: Render Dashboard -> New -> Blueprint -> chọn repo này
+#
+# LƯU Ý QUAN TRỌNG:
+# - Plan "starter" là plan rẻ nhất CÓ persistent disk. Plan free KHÔNG có disk
+#   -> SQLite (data/messages.db) và session sẽ MẤT mỗi lần restart.
+# - Sau khi deploy lần đầu: mở URL app, quét QR Zalo để đăng nhập. Session
+#   được lưu vào persistent disk -> các lần restart sau tự đăng nhập lại.
+services:
+  - type: web
+    name: zalo-archive
+    runtime: node
+    plan: starter          # đổi thành "free" nếu chấp nhận mất DB khi restart
+    region: singapore      # gần Việt Nam nhất
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    disk:
+      name: zalo-data
+      mountPath: /opt/render/project/src/data   # Node source dir = /opt/render/project/src (docs Render)
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # ===== Bảo mật web (BẮT BUỘC khi deploy công khai) =====
+      - key: WEB_USER
+        sync: false        # điền trong dashboard (vd: zalo)
+      - key: WEB_PASSWORD
+        sync: false        # điền trong dashboard — KHÔNG để trống!
+      # ===== Zalo session bootstrap (tuỳ chọn) =====
+      # Copy từ data/session_base64.txt sau lần quét QR đầu tiên ở máy local.
+      # Nếu bỏ trống: mở web trên Render và quét QR trực tiếp cũng được.
+      - key: SESSION_JSON_BASE64
+        sync: false
+      # ===== Cloudflare R2 archive media (tuỳ chọn) =====
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET
+        sync: false
+      - key: R2_PUBLIC_BASE
+        sync: false

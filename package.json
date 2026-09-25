@@ -1,7 +1,7 @@
 {
-  "name": "zalo-telegram-bridge",
-  "version": "1.0.0",
-  "description": "Log tin nhắn Zalo cá nhân (đến & đi, qua zca-js) và gửi báo cáo định kỳ về Telegram",
+  "name": "zalo-archive",
+  "version": "2.0.0",
+  "description": "Lưu trữ tin nhắn Zalo cá nhân (đa tài khoản) vào SQLite và xem trên web giống Zalo, chỉ đọc",
   "main": "src/index.js",
   "type": "commonjs",
   "scripts": {
@@ -9,11 +9,10 @@
     "dev": "node --watch src/index.js"
   },
   "dependencies": {
+    "axios": "^1.7.7",
     "better-sqlite3": "^11.3.0",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "node-cron": "^3.0.3",
-    "axios": "^1.7.7",
     "zca-js": "^2.0.0"
   }
 }
