@@ -76,7 +76,11 @@ app.use(basicAuth);
 // Static web UI
 // ============================================================
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
-app.use(express.static(PUBLIC_DIR));
+// no-cache: browser vẫn được cache nhưng phải revalidate (ETag) mỗi lần —
+// đảm bảo sau mỗi deploy là UI mới hiện ngay, không kẹt bản cũ
+app.use(express.static(PUBLIC_DIR, {
+  setHeaders(res) { res.setHeader('Cache-Control', 'no-cache'); },
+}));
 
 // ============================================================
 // Auth — QR login flow (khởi tạo từ web)
