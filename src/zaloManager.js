@@ -314,6 +314,25 @@ async function removeAccountRuntime(ownId) {
   await deleteAccountSession(ownId);
 }
 
+/**
+ * Đăng xuất một tài khoản: dừng listener + xoá session (sẽ KHÔNG tự đăng nhập
+ * lại khi restart), nhưng GIỮ NGUYÊN toàn bộ dữ liệu tin nhắn trong DB.
+ * Quét QR lại bất cứ lúc nào để tiếp tục track với data cũ còn nguyên.
+ */
+async function logoutAccount(ownId) {
+  const entry = accounts.get(ownId);
+  if (entry) {
+    try {
+      entry.listener.stop();
+    } catch {
+      /* đã đóng rồi */
+    }
+    accounts.delete(ownId);
+  }
+  await deleteAccountSession(ownId);
+  console.log(`[auth] Đã đăng xuất tài khoản ${ownId} (dữ liệu tin nhắn giữ nguyên)`);
+}
+
 module.exports = {
   ThreadType,
   startQrLogin,
@@ -321,6 +340,7 @@ module.exports = {
   cancelQrLogin,
   restoreSessions,
   removeAccountRuntime,
+  logoutAccount,
   getAccount,
   listAccounts,
   getAnyApi,

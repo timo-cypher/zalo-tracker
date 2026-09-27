@@ -84,14 +84,45 @@ function renderAccountBar() {
     dot.className = 'status-dot';
 
     chip.append(img, name, dot);
-    chip.onclick = () => selectAccount(acc.id);
+    chip.onclick = () => {
+      // Bỏ qua cú click phát sinh ngay sau nhấn giữ (đã mở menu)
+      if (Date.now() - (state._menuOpenedAt || 0) < 700) return;
+      selectAccount(acc.id);
+    };
+
+    // Mở menu tài khoản: bấm lần nữa vào chip đang chọn / nhấn giữ (mobile) / chuột phải
+    const openMenu = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (acc.id !== state.currentAccount) selectAccount(acc.id);
+      showAccountMenu(acc);
+    };
+    chip.oncontextmenu = openMenu;
+    let pressTimer = null;
+    chip.ontouchstart = (e) => {
+      pressTimer = setTimeout(() => openMenu(e), 500);
+    };
+    const cancelPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
+    chip.ontouchend = cancelPress;
+    chip.ontouchmove = cancelPress;
+
     bar.appendChild(chip);
   }
+}
+
+function showAccountMenu(acc) {
+  state.menuAccountId = acc.id;
+  state._menuOpenedAt = Date.now();
+  const name = acc.name || acc.id;
+  $('btn-account-logout').textContent = `🚪 Đăng xuất "${name}" (giữ dữ liệu)`;
+  $('btn-account-delete').textContent = `🗑 Gỡ vĩnh viễn "${name}"`;
+  $('account-menu').classList.remove('hidden');
 }
 
 async function selectAccount(accountId) {
   state.currentAccount = accountId;
   state.currentThread = null;
+  $('account-menu').classList.add('hidden');
   renderAccountBar();
   await loadThreads();
   showChatPlaceholder();
@@ -700,6 +731,35 @@ $('btn-qr-retry').onclick = openQrModal;
 
 $('btn-thread-menu').onclick = () => $('thread-menu').classList.toggle('hidden');
 
+// Menu tài khoản: đăng xuất (giữ data) / gỡ vĩnh viễn (xoá hết)
+$('btn-account-logout').onclick = async () => {
+  const id = state.menuAccountId;
+  $('account-menu').classList.add('hidden');
+  if (!id) return;
+  const acc = state.accounts.find((a) => a.id === id);
+  if (!confirm(`Đăng xuất "${acc?.name || id}"?\n\nTin nhắn đã lưu vẫn còn nguyên. Tài khoản ngừng lưu tin nhắn mới cho đến khi quét QR đăng nhập lại.`)) return;
+  await api(`/api/accounts/${encodeURIComponent(id)}/logout`, { method: 'POST' });
+  await refreshAccounts();
+  renderAccountBar();
+};
+
+$('btn-account-delete').onclick = async () => {
+  const id = state.menuAccountId;
+  $('account-menu').classList.add('hidden');
+  if (!id) return;
+  const acc = state.accounts.find((a) => a.id === id);
+  if (!confirm(`Gỡ vĩnh viễn "${acc?.name || id}"?\n\nToàn bộ tài khoản, cuộc trò chuyện, tin nhắn và media đã lưu sẽ bị XOÁ SẠCH. Không thể hoàn tác!`)) return;
+  await api(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  await refreshAccounts();
+  if (state.accounts.length === 0) {
+    $('app').classList.add('hidden');
+    $('empty-screen').classList.remove('hidden');
+  } else {
+    renderAccountBar();
+    await selectAccount(state.accounts[0].id);
+  }
+};
+
 // Nút back trong khung chat (mobile) + nút back/cử chỉ của trình duyệt
 $('btn-back').onclick = () => {
   if (history.state && history.state.chatOpen) history.back(); // popstate sẽ gọi showChatPlaceholder
@@ -763,6 +823,10 @@ document.addEventListener('click', (e) => {
   // Đóng thread menu khi bấm ra ngoài
   if (!e.target.closest('#thread-menu') && !e.target.closest('#btn-thread-menu')) {
     $('thread-menu').classList.add('hidden');
+  }
+  // Đóng account menu khi bấm ra ngoài
+  if (!e.target.closest('#account-menu') && !e.target.closest('.account-chip')) {
+    $('account-menu').classList.add('hidden');
   }
 });
 

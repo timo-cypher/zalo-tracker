@@ -117,6 +117,16 @@ app.get('/api/accounts', async (_req, res) => {
   }
 });
 
+// Đăng xuất tài khoản: dừng listener + xoá session, GIỮ NGUYÊN dữ liệu đã lưu
+app.post('/api/accounts/:id/logout', async (req, res) => {
+  try {
+    await zaloManager.logoutAccount(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.delete('/api/accounts/:id', async (req, res) => {
   try {
     const { id } = req.params;

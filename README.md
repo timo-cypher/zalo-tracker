@@ -107,6 +107,8 @@ Không cấu hình R2 = app vẫn chạy bình thường, media sống theo tu�
 | `POST /api/auth/qr/start` | Bắt đầu flow đăng nhập QR |
 | `GET /api/auth/qr/status` | Trạng thái flow QR |
 | `GET /api/accounts` | Danh sách tài khoản |
+| `POST /api/accounts/:id/logout` | Đăng xuất tài khoản (giữ nguyên dữ liệu đã lưu) |
+| `DELETE /api/accounts/:id` | Gỡ vĩnh viễn tài khoản (xoá cả dữ liệu + media R2) |
 | `GET /api/threads?accountId=...` | Danh sách cuộc trò chuyện |
 | `POST /api/threads/:key/refresh` | Làm mới tên/SĐT một thread |
 | `POST /api/threads/refresh-all` | Làm mới tất cả thread của 1 tài khoản |
