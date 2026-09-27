@@ -159,6 +159,43 @@ const groupInfoCache = new Map(); // groupId -> { name, avatar, at }
 const META_TTL = 24 * 60 * 60 * 1000; // 24h
 const ERROR_TTL = 60 * 1000; // lỗi thì thử lại sau 60s, không spam API từng tin
 
+/**
+ * Archive avatar lên R2 — fetch ĐÚNG MỘT LẦN khi lần đầu gặp người/nhóm này,
+ * lưu key `avatars/<accountId>/<threadId>` (không ext — overwrite sạch khi
+ * refetch, không sinh object rác). DB sẽ lưu `r2://avatars/...` giữ mãi,
+ * không phụ thuộc URL Zalo CDN hết hạn.
+ * Lỗi (mạng/R2) -> trả null, giữ nguyên URL Zalo (vẫn xem được qua proxy).
+ */
+async function archiveAvatar(entry, accountId, threadId, avatarUrl) {
+  if (!mediaStore.isConfigured() || !avatarUrl) return null;
+  if (avatarUrl.startsWith('r2://')) return avatarUrl; // đã archive rồi
+  if (!/^https:\/\//.test(avatarUrl)) return null;
+  try {
+    const session = loadAccountSession(accountId) || {};
+    const headers = { Referer: 'https://zalo.me/' };
+    if (Array.isArray(session.cookie)) {
+      headers.Cookie = session.cookie.map((c) => `${c.key || c.name}=${c.value}`).join('; ');
+    }
+    const res = await axios.get(avatarUrl, {
+      responseType: 'arraybuffer',
+      headers,
+      timeout: 15_000,
+      maxContentLength: 5 * 1024 * 1024, // avatar không quá 5MB
+    });
+    const contentType = res.headers['content-type'] || 'image/jpeg';
+    const key = `avatars/${accountId}/${threadId}`;
+    const saved = await mediaStore.uploadMedia(key, Buffer.from(res.data), contentType);
+    if (saved) {
+      console.log(`[avatar] Đã archive avatar: ${key} (${(res.data.length / 1024).toFixed(0)}KB)`);
+      return `r2://${key}`;
+    }
+    return null;
+  } catch (err) {
+    console.error('[avatar] Lỗi archive avatar:', err?.message || err);
+    return null;
+  }
+}
+
 async function fetchThreadMeta(entry, threadId, isGroup, { existing = null, ownerName = null, force = false } = {}) {
   if (isGroup) {
     return await fetchGroupMeta(entry, threadId, { existing, force });
@@ -213,6 +250,11 @@ async function fetchUserMeta(entry, threadId, { existing = null, ownerName = nul
       // '' = đã thử lấy nhưng người này ẩn SĐT -> không thử lại nữa
       phone = profile.phoneNumber || existing?.phone || '';
       ok = true;
+      // Lưu avatar vĩnh viễn lên R2 (fetch 1 lần duy nhất)
+      if (avatar) {
+        const archived = await archiveAvatar(entry, entry.ownId, threadId, avatar);
+        if (archived) avatar = archived;
+      }
     }
   } catch {
     /* lỗi API — đánh dấu error, thử lại sau 60s */
@@ -250,6 +292,11 @@ async function fetchGroupMeta(entry, threadId, { existing = null, force = false 
       name = g.name || null;
       avatar = g.fullAvt || g.avt || null;
       ok = true;
+      // Lưu avatar nhóm vĩnh viễn lên R2 (fetch 1 lần duy nhất)
+      if (avatar) {
+        const archived = await archiveAvatar(entry, entry.ownId, threadId, avatar);
+        if (archived) avatar = archived;
+      }
     }
   } catch {
     /* lỗi API */

@@ -18,7 +18,7 @@ lưu vào SQLite và xem lại trên **web giao diện giống Zalo** — chỉ 
   - *Tạm ngừng lưu*: ngừng lưu tin nhắn mới, giữ dữ liệu cũ, lưu lại được
   - *Gỡ vĩnh viễn*: xoá thread + dữ liệu và đưa vào blacklist — không bao giờ
     xuất hiện lại kể cả khi có tin nhắn mới (trừ khi chọn "Cho phép quay lại")
-- **Archive media vĩnh viễn (tuỳ chọn — Cloudflare R2)**: ảnh/video được tải
+- **Archive media vĩnh viễn (tuỳ chọn — Cloudflare R2)**: ảnh/video **và avatar** được tải
   từ Zalo CDN và upload lên R2, vì URL Zalo CDN hết hạn sau vài ngày.
 - **Tin nhắn real-time**: tin mới hiện ngay trên web (SSE), không cần refresh.
 - **Session tự lưu**: sau khi quét QR lần đầu, các lần chạy sau tự đăng nhập

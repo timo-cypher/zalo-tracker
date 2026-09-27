@@ -391,11 +391,30 @@ app.get('/api/events', (req, res) => {
 });
 
 // ============================================================
-// Proxy avatar qua server — Zalo CDN chặn hotlink/referer
+// Proxy avatar qua server — 2 nguồn:
+//   1. r2://key  -> đọc từ R2 (avatar đã archive vĩnh viễn)
+//   2. URL Zalo  -> proxy qua server (Zalo CDN chặn hotlink/referer)
 // ============================================================
 app.get('/api/avatar', async (req, res) => {
   const { url } = req.query;
-  if (!url || !/^https:\/\/(s100|s120|s240|avatar|file)\.zalo\.cdn\.com\//.test(url)) {
+  if (!url) return res.status(400).json({ error: 'Thiếu url' });
+
+  // 1. Avatar đã archive trên R2 — serve trực tiếp, cache dài hạn (file không đổi)
+  if (url.startsWith('r2://')) {
+    try {
+      const media = await mediaStore.getMediaStream(url.slice('r2://'.length));
+      if (!media) return res.status(404).json({ error: 'Avatar không tồn tại' });
+      res.setHeader('Content-Type', media.contentType || 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=604800'); // 7 ngày
+      media.stream.pipe(res);
+    } catch (err) {
+      res.status(502).json({ error: 'Không đọc được avatar từ R2' });
+    }
+    return;
+  }
+
+  // 2. URL Zalo CDN — proxy như cũ
+  if (!/^https:\/\/(s100|s120|s240|avatar|file)\.zalo\.cdn\.com\//.test(url)) {
     return res.status(400).json({ error: 'URL không hợp lệ' });
   }
   try {
