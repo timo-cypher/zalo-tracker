@@ -87,7 +87,8 @@ button { font-family: inherit; cursor: pointer; }
 /* ============ Layout chính ============ */
 .app {
   display: flex;
-  height: 100vh;
+  height: 100vh; /* fallback cho trình duyệt cũ */
+  height: 100dvh; /* mobile: dvh trừ phần toolbar trình duyệt — fix danh sách không cuộn hết */
   overflow: hidden;
 }
 
@@ -168,7 +169,10 @@ button { font-family: inherit; cursor: pointer; }
 
 .thread-list {
   flex: 1;
+  min-height: 0; /* cho phép co lại trong flex để overflow-y hoạt động chuẩn */
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch; /* momentum scroll trên iOS */
+  overscroll-behavior: contain;
 }
 
 /* Chat head — mỗi cuộc trò chuyện */
@@ -253,6 +257,7 @@ button { font-family: inherit; cursor: pointer; }
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
 }
 
 .chat-header {
@@ -310,7 +315,10 @@ button { font-family: inherit; cursor: pointer; }
 /* ============ Tin nhắn ============ */
 .message-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   padding: 20px 24px 12px;
   background: var(--chat-bg);
 }
