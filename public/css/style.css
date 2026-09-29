@@ -536,7 +536,15 @@ button { font-family: inherit; cursor: pointer; }
 
 /* Responsive */
 @media (max-width: 720px) {
-  .sidebar { width: 100%; min-width: 0; }
+  .sidebar {
+    width: 100%;
+    min-width: 0;
+    /* Cột dọc: bắt sidebar co đúng chiều cao .app — nếu không nó giãn theo
+       nội dung và bị overflow:hidden cắt cụt, thread-list không bao giờ cuộn */
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
   .app { flex-direction: column; }
   .chat-panel { display: none; }
   .app.chat-open .sidebar { display: none; }
